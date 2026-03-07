@@ -19,6 +19,11 @@ final class SessionListViewModel {
         sessions = persistence.fetchSessions()
     }
 
+    func fetchSessions(for serverConfig: ServerConfig?) {
+        let persistence = PersistenceService(modelContext: modelContext)
+        sessions = persistence.fetchSessions(for: serverConfig)
+    }
+
     func createSession(title: String, serverConfig: ServerConfig?) -> Session {
         let session = Session(title: title, serverConfig: serverConfig)
         modelContext.insert(session)

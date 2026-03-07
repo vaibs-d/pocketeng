@@ -32,7 +32,7 @@ struct RootView: View {
             port: 22,
             username: "ec2-user",
             privateKeyReference: keyIdentifier,
-            label: "Pocket Engineer",
+            label: host,
             workingDirectory: "~/projects"
         )
         modelContext.insert(config)

@@ -17,6 +17,9 @@ final class ConnectionViewModel {
     var isConnecting: Bool = false
     var claudeInstalled: Bool?
 
+    /// The saved ServerConfig we are currently connected to (or about to connect to).
+    var currentConfig: ServerConfig?
+
     private let sshService: SSHService
     private let modelContext: ModelContext
 
@@ -41,6 +44,27 @@ final class ConnectionViewModel {
         }
     }
 
+    /// Populate VM fields from an existing ServerConfig.
+    @MainActor
+    func loadConfig(_ config: ServerConfig) {
+        host = config.host
+        port = String(config.port)
+        username = config.username
+        workingDirectory = config.workingDirectory
+        label = config.label
+        keyIdentifier = config.privateKeyReference
+        keyImported = true
+        currentConfig = config
+    }
+
+    /// Switch to a different server: disconnect, load its config, reconnect.
+    @MainActor
+    func switchToServer(_ config: ServerConfig) async {
+        await disconnect()
+        loadConfig(config)
+        await connect()
+    }
+
     @MainActor
     func connect() async {
         guard let keyId = keyIdentifier else {
@@ -61,17 +85,29 @@ final class ConnectionViewModel {
                 privateKeyData: keyData
             )
 
-            let config = ServerConfig(
-                host: host,
-                port: Int(port) ?? 22,
-                username: username,
-                privateKeyReference: keyId,
-                label: label,
-                workingDirectory: workingDirectory
-            )
-            config.lastConnectedAt = Date()
-            modelContext.insert(config)
-            try? modelContext.save()
+            // Update existing config or create new one
+            if let existing = currentConfig {
+                existing.host = host
+                existing.port = Int(port) ?? 22
+                existing.username = username
+                existing.workingDirectory = workingDirectory
+                existing.label = label
+                existing.lastConnectedAt = Date()
+                try? modelContext.save()
+            } else {
+                let config = ServerConfig(
+                    host: host,
+                    port: Int(port) ?? 22,
+                    username: username,
+                    privateKeyReference: keyId,
+                    label: label,
+                    workingDirectory: workingDirectory
+                )
+                config.lastConnectedAt = Date()
+                modelContext.insert(config)
+                try? modelContext.save()
+                currentConfig = config
+            }
 
             connectionState = .connected
             isConnecting = false
@@ -135,6 +171,7 @@ final class ConnectionViewModel {
             label = config.label
             keyIdentifier = config.privateKeyReference
             keyImported = true
+            currentConfig = config
         }
     }
 

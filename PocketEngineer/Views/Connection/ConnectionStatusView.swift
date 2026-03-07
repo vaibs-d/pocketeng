@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ConnectionStatusView: View {
     let state: SSHConnectionState
+    var serverLabel: String? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -12,6 +13,12 @@ struct ConnectionStatusView: View {
             Text(statusText)
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundColor(.textSecondary)
+
+            if let label = serverLabel, !label.isEmpty {
+                Text("· \(label)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.textTertiary)
+            }
 
             Spacer()
         }

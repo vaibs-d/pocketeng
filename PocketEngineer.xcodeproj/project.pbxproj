@@ -30,6 +30,7 @@
 		53696459D3166A13A8BBC11D /* AppPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B8EBFFA7C9FB60400ECFBE /* AppPreviewView.swift */; };
 		65E9D85320005DC3F5097673 /* AWSSigV4.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE3BD2A969DB506CF5F4852 /* AWSSigV4.swift */; };
 		6DA02D34292E049179944DA9 /* MessageBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC788B1394544DC19B0F2F5 /* MessageBubbleView.swift */; };
+		GG1111111111111111111111 /* AddServerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG2222222222222222222222 /* AddServerView.swift */; };
 		712E4485A61DF494937DE786 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12645E83A469062FADE7086B /* ContentView.swift */; };
 		7259054CCFDF007AA640439B /* EC2ProvisioningService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91AFE456DB4170E46163C04F /* EC2ProvisioningService.swift */; };
 		7D840E801D6A3B945AAE1F53 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4B64E889BC2731B1C19FF2 /* RootView.swift */; };
@@ -78,6 +79,7 @@
 		06C0B48C68DE04C8ECEB6EC7 /* SessionStatusBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStatusBanner.swift; sourceTree = "<group>"; };
 		0AF90017ABD93AD467E4A4BE /* ProjectContextSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectContextSheet.swift; sourceTree = "<group>"; };
 		0E4B64E889BC2731B1C19FF2 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		GG2222222222222222222222 /* AddServerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddServerView.swift; sourceTree = "<group>"; };
 		12645E83A469062FADE7086B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		17D973D3F1692B4088399E7B /* CrossPlatform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossPlatform.swift; sourceTree = "<group>"; };
 		1C2BD3123B01F7D1513767EA /* SSHKeyParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyParser.swift; sourceTree = "<group>"; };
@@ -209,6 +211,7 @@
 		537177663DEC1A1B4D9EC391 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				GG2222222222222222222222 /* AddServerView.swift */,
 				12645E83A469062FADE7086B /* ContentView.swift */,
 				0E4B64E889BC2731B1C19FF2 /* RootView.swift */,
 				93DDA5651EFAA6D19EDE6463 /* Chat */,
@@ -497,6 +500,7 @@
 				28415CC0AA671D93EDB90A4E /* ConnectionSetupView.swift in Sources */,
 				22E10EC31700F92A0781F36E /* ConnectionStatusView.swift in Sources */,
 				7F34BB0B954D7720C1DBB1B8 /* ConnectionViewModel.swift in Sources */,
+				GG1111111111111111111111 /* AddServerView.swift in Sources */,
 				712E4485A61DF494937DE786 /* ContentView.swift in Sources */,
 				BC617E87A317DFC56306E255 /* CrossPlatform.swift in Sources */,
 				E9EFF562E97C9AD4C49BF40C /* DefaultEC2Config.swift in Sources */,

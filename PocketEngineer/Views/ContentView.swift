@@ -4,12 +4,15 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Query(sort: \ServerConfig.lastConnectedAt, order: .reverse)
+    private var serverConfigs: [ServerConfig]
     @State private var appState = AppState()
     @State private var sshService = SSHService()
     @State private var connectionVM: ConnectionViewModel?
     @State private var sessionListVM: SessionListViewModel?
     @State private var showConnectionSetup = false
     @State private var showPickUpSession = false
+    @State private var showAddServer = false
     @State private var selectedSessionId: UUID?
     @State private var navigationPath = NavigationPath()
     @State private var pendingInitialPrompt: String?
@@ -44,21 +47,27 @@ struct ContentView: View {
             if sessionListVM == nil {
                 sessionListVM = SessionListViewModel(modelContext: modelContext)
             }
+            // Set active server from the loaded config
+            if appState.activeServerConfig == nil, let config = connectionVM?.currentConfig {
+                appState.activeServerConfig = config
+            }
         }
         .task {
             if let vm = connectionVM, vm.canConnect, vm.connectionState == .disconnected {
                 await vm.connect()
+            }
+            // Filter sessions for active server
+            if let config = appState.activeServerConfig {
+                sessionListVM?.fetchSessions(for: config)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard let vm = connectionVM else { return }
             switch newPhase {
             case .background:
-                // Tear down SSH cleanly so we don't get NIOSSHError on resume
                 Task { await sshService.teardownIfNeeded() }
                 vm.connectionState = .disconnected
             case .active:
-                // Reconnect when app comes back to foreground
                 if vm.canConnect && vm.connectionState != .connected && vm.connectionState != .connecting {
                     Task { await vm.reconnectIfNeeded() }
                 }
@@ -71,8 +80,17 @@ struct ContentView: View {
     @ViewBuilder
     private var mainListView: some View {
         VStack(spacing: 0) {
+            // Connection status with server label
             if let vm = connectionVM {
-                ConnectionStatusView(state: vm.connectionState)
+                ConnectionStatusView(
+                    state: vm.connectionState,
+                    serverLabel: appState.activeServerConfig?.label
+                )
+            }
+
+            // Server picker (only when multiple servers exist)
+            if serverConfigs.count > 1 {
+                serverPicker
             }
 
             if let listVM = sessionListVM {
@@ -161,8 +179,10 @@ struct ContentView: View {
         )) {
             NewSessionView { title, initialPrompt in
                 if let listVM = sessionListVM {
-                    let serverConfig = PersistenceService(modelContext: modelContext).fetchServerConfig()
-                    let session = listVM.createSession(title: title, serverConfig: serverConfig)
+                    let session = listVM.createSession(
+                        title: title,
+                        serverConfig: appState.activeServerConfig
+                    )
                     pendingInitialPrompt = initialPrompt
                     navigationPath.append(session.id)
                 }
@@ -173,19 +193,107 @@ struct ContentView: View {
                 pickUpRemoteSession(remoteSession)
             }
         }
+        .sheet(isPresented: $showAddServer) {
+            AddServerView { host, sshKeyData, serverLabel in
+                saveNewServer(host: host, sshKeyData: sshKeyData, label: serverLabel)
+            }
+        }
+    }
+
+    // MARK: - Server Picker
+
+    @ViewBuilder
+    private var serverPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(serverConfigs, id: \.id) { config in
+                    let isActive = appState.activeServerConfig?.id == config.id
+                    Button {
+                        Task { await switchToServer(config) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(isActive ? Color.accent : Color.textTertiary)
+                                .frame(width: 6, height: 6)
+                            Text(config.label.isEmpty ? config.host : config.label)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(isActive ? .accent : .textSecondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(isActive ? Color.accent.opacity(0.1) : Color.surfaceRaised)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().stroke(
+                                isActive ? Color.accent.opacity(0.3) : Color.surfaceBorder,
+                                lineWidth: 1
+                            )
+                        )
+                    }
+                }
+
+                // Add server button
+                Button {
+                    showAddServer = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.textTertiary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.surfaceRaised)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.surfaceBorder, lineWidth: 1))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func switchToServer(_ config: ServerConfig) async {
+        appState.switchServer(to: config)
+        await connectionVM?.switchToServer(config)
+        sessionListVM?.fetchSessions(for: config)
     }
 
     private func pickUpRemoteSession(_ remote: RemoteSession) {
         guard let listVM = sessionListVM else { return }
-        let serverConfig = PersistenceService(modelContext: modelContext).fetchServerConfig()
         let session = listVM.createSession(
             title: remote.displayTitle,
-            serverConfig: serverConfig
+            serverConfig: appState.activeServerConfig
         )
         session.remoteSessionId = remote.id
         try? modelContext.save()
         navigationPath.append(session.id)
     }
+
+    private func saveNewServer(host: String, sshKeyData: Data, label: String) {
+        let keyIdentifier = "key-provisioned-\(UUID().uuidString.prefix(8))"
+        do {
+            try SSHKeyManager.storeKey(sshKeyData, identifier: keyIdentifier)
+        } catch {
+            print("Failed to store SSH key: \(error)")
+            return
+        }
+
+        let config = ServerConfig(
+            host: host,
+            port: 22,
+            username: "ec2-user",
+            privateKeyReference: keyIdentifier,
+            label: label,
+            workingDirectory: "~/projects"
+        )
+        modelContext.insert(config)
+        try? modelContext.save()
+
+        Task { await switchToServer(config) }
+    }
+
+    // MARK: - Helpers
 
     private var connectionIcon: String {
         switch connectionVM?.connectionState ?? .disconnected {

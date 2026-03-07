@@ -5,7 +5,7 @@ import Observation
 final class AppState {
     var selectedSession: Session?
     var connectionState: SSHConnectionState = .disconnected
-    var currentServerConfig: ServerConfig?
+    var activeServerConfig: ServerConfig?
 
     func selectSession(_ session: Session) {
         selectedSession = session
@@ -13,5 +13,9 @@ final class AppState {
 
     func clearSelection() {
         selectedSession = nil
+    }
+
+    func switchServer(to config: ServerConfig) {
+        activeServerConfig = config
     }
 }
