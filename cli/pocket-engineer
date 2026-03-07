@@ -87,10 +87,25 @@ try:
     if len(m) % 2 == 1:
         print('  ' + ''.join(chr(0x2580) if m[-1][c] else ' ' for c in range(len(m[-1]))))
 except ImportError:
-    print('  [Install qrcode for QR display: pip3 install qrcode]')
-    print()
-    print('  Connection string (enter manually in app):')
-    print('  ' + data[:80] + '...')
+    import subprocess
+    print('  Installing qrcode library...')
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'qrcode'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import qrcode
+    qr = qrcode.QRCode(version=None, box_size=1, border=1, error_correction=qrcode.constants.ERROR_CORRECT_L)
+    qr.add_data(data)
+    qr.make(fit=True)
+    m = qr.modules
+    for r in range(0, len(m) - 1, 2):
+        line = '  '
+        for c in range(len(m[r])):
+            top, bot = m[r][c], m[r+1][c] if r+1 < len(m) else False
+            if top and bot: line += chr(0x2588)
+            elif top: line += chr(0x2580)
+            elif bot: line += chr(0x2584)
+            else: line += ' '
+        print(line)
+    if len(m) % 2 == 1:
+        print('  ' + ''.join(chr(0x2580) if m[-1][c] else ' ' for c in range(len(m[-1]))))
 " "$data" 2>/dev/null
 }
 
