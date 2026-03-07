@@ -1,0 +1,133 @@
+#!/bin/bash
+# Pocket Engineer — Start Claude Code on EC2 via tmux
+# Sessions survive laptop disconnection. Pick them up on your phone or reconnect later.
+#
+# Usage:
+#   pocket-engineer                       # Interactive Claude Code on EC2
+#   pocket-engineer "build a dashboard"   # One-shot prompt (runs in background, survives disconnect)
+#   pocket-engineer --resume <id>         # Resume a Claude session
+#   pocket-engineer --attach              # Reattach to running tmux session
+#   pocket-engineer --list                # List recent Claude sessions
+#   pocket-engineer --status              # Check if Claude is running
+
+set -e
+
+# Config — update these or set env vars
+EC2_HOST="${POCKET_ENGINEER_HOST:-18.207.230.14}"
+EC2_USER="${POCKET_ENGINEER_USER:-ec2-user}"
+SSH_KEY="${POCKET_ENGINEER_KEY:-$HOME/.ssh/claude-remote-key.pem}"
+WORK_DIR="${POCKET_ENGINEER_DIR:-~/projects}"
+TMUX_SESSION="pocket-engineer"
+
+# Colors
+PURPLE='\033[0;35m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+DIM='\033[2m'
+NC='\033[0m'
+
+ssh_cmd() {
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ServerAliveInterval=30 "$EC2_USER@$EC2_HOST" "$@"
+}
+
+case "${1:-}" in
+    --list|-l)
+        echo -e "${PURPLE}Pocket Engineer${NC} — Sessions on EC2"
+        echo ""
+        ssh_cmd "
+            for dir in ~/.claude/projects/*/; do
+                for f in \"\$dir\"*.jsonl; do
+                    [ -f \"\$f\" ] || continue
+                    sid=\$(basename \"\$f\" .jsonl)
+                    echo \"\$sid\" | grep -q '^agent-' && continue
+                    first=\$(head -1 \"\$f\" | grep -oP '\"content\":\"\\K[^\"]+' | head -c 80)
+                    last=\$(tail -1 \"\$f\" | grep -oP '\"timestamp\":\"\\K[^\"]+')
+                    printf '  %s  %s  %s\n' \"\${sid:0:8}\" \"\$last\" \"\$first\"
+                done
+            done | sort -k2 -r | head -10
+        "
+        echo ""
+        echo -e "${DIM}Resume with: pocket-engineer --resume <session-id>${NC}"
+        ;;
+
+    --resume|-r)
+        if [ -z "${2:-}" ]; then
+            echo "Usage: pocket-engineer --resume <session-id>"
+            exit 1
+        fi
+        echo -e "${PURPLE}Pocket Engineer${NC} — Resuming session ${2:0:8}..."
+        echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
+        echo -e "${DIM}Pick up on your phone with the ↓ button.${NC}"
+        echo ""
+        ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude --resume \"$2\"'"
+        ;;
+
+    --attach|-a)
+        echo -e "${PURPLE}Pocket Engineer${NC} — Reattaching..."
+        ssh_cmd -t "tmux attach-session -t $TMUX_SESSION 2>/dev/null || echo 'No active session. Start one with: pocket-engineer'"
+        ;;
+
+    --status|-s)
+        echo -e "${PURPLE}Pocket Engineer${NC} — Status"
+        RUNNING=$(ssh_cmd "tmux has-session -t $TMUX_SESSION 2>/dev/null && echo 'RUNNING' || echo 'STOPPED'")
+        if [ "$RUNNING" = "RUNNING" ]; then
+            echo -e "  ${GREEN}●${NC} Claude is running on EC2"
+            echo -e "  ${DIM}Reattach with: pocket-engineer --attach${NC}"
+        else
+            echo -e "  ○ No active session"
+            echo -e "  ${DIM}Start with: pocket-engineer${NC}"
+        fi
+        ;;
+
+    --detach|-d)
+        echo -e "${PURPLE}Pocket Engineer${NC} — Detaching (session keeps running)"
+        echo -e "${DIM}Reattach with: pocket-engineer --attach${NC}"
+        echo -e "${DIM}Or pick up on your phone.${NC}"
+        # Just disconnect — tmux keeps running
+        ;;
+
+    --help|-h)
+        echo "Pocket Engineer — Claude Code on EC2"
+        echo ""
+        echo "Usage:"
+        echo "  pocket-engineer                      Interactive Claude (in tmux)"
+        echo "  pocket-engineer \"build X\"             Send prompt (in tmux)"
+        echo "  pocket-engineer --resume <id>         Resume a Claude session"
+        echo "  pocket-engineer --attach              Reattach to running session"
+        echo "  pocket-engineer --status              Check if Claude is running"
+        echo "  pocket-engineer --list                List recent sessions"
+        echo ""
+        echo "How it works:"
+        echo "  Sessions run inside tmux on EC2, so they survive if you:"
+        echo "  - Close your laptop lid"
+        echo "  - Lose WiFi"
+        echo "  - Switch to your phone"
+        echo ""
+        echo "  Just run 'pocket-engineer --attach' to reconnect, or"
+        echo "  pick up the session on your phone with Pocket Engineer app."
+        echo ""
+        echo "Environment variables:"
+        echo "  POCKET_ENGINEER_HOST    EC2 hostname (default: 18.207.230.14)"
+        echo "  POCKET_ENGINEER_USER    SSH user (default: ec2-user)"
+        echo "  POCKET_ENGINEER_KEY     SSH key path (default: ~/.ssh/claude-remote-key.pem)"
+        echo "  POCKET_ENGINEER_DIR     Working directory (default: ~/projects)"
+        ;;
+
+    "")
+        echo -e "${PURPLE}Pocket Engineer${NC} — Interactive mode"
+        echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
+        echo -e "${DIM}Reattach: pocket-engineer --attach${NC}"
+        echo -e "${DIM}Pick up on phone: tap ↓ in the app${NC}"
+        echo ""
+        # Kill old tmux session if exists, start fresh
+        ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude'"
+        ;;
+
+    *)
+        echo -e "${PURPLE}Pocket Engineer${NC} — Sending prompt..."
+        echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
+        echo -e "${DIM}Reattach: pocket-engineer --attach${NC}"
+        echo ""
+        ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude -p '\"'\"'$1'\"'\"' --verbose'"
+        ;;
+esac

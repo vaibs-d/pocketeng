@@ -1,0 +1,25 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserdata
+*.xcworkspace
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Secrets / keys
+*.pem
+.env
+.pocket-engineer/
+
+# Archives
+*.ipa
+*.dSYM.zip
+*.dSYM
