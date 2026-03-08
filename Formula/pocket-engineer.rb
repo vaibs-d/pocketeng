@@ -5,8 +5,6 @@ class PocketEngineer < Formula
   version "1.1.0"
   license "MIT"
 
-  depends_on "awscli"
-
   def install
     bin.install "pocket-engineer"
   end
