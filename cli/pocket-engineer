@@ -663,12 +663,12 @@ cmd_help() {
     echo "Daily use:"
     echo "  pocket-engineer                      Interactive Claude Code session"
     echo "  pocket-engineer \"prompt\"              One-shot prompt"
-    echo "  pocket-engineer --attach              Reattach to running session"
-    echo "  pocket-engineer --resume <id>         Resume a past session"
-    echo "  pocket-engineer --list                List sessions"
-    echo "  pocket-engineer --status              Check if Claude is running"
-    echo "  pocket-engineer --qr                  Show QR code for phone app"
-    echo "  pocket-engineer --logs                Show EC2 setup/install log"
+    echo "  pocket-engineer attach                Reattach to running session"
+    echo "  pocket-engineer resume <id>           Resume a past session"
+    echo "  pocket-engineer list                  List sessions"
+    echo "  pocket-engineer status                Check if Claude is running"
+    echo "  pocket-engineer qr                    Show QR code for phone app"
+    echo "  pocket-engineer logs                  Show EC2 setup/install log"
     echo "  pocket-engineer sync [path] [id]      Sync project + session to EC2"
     echo ""
     echo "How it works:"
@@ -685,14 +685,14 @@ case "${1:-}" in
     init)           cmd_init ;;
     setup)          cmd_setup ;;
     sync)           cmd_sync "$@" ;;
-    --list|-l)      cmd_list ;;
-    --resume|-r)    cmd_resume "${2:-}" ;;
-    --attach|-a)    cmd_attach ;;
-    --status|-s)    cmd_status ;;
-    --qr)           cmd_qr ;;
-    --logs)         cmd_logs ;;
-    --help|-h)      cmd_help ;;
-    --version|-v)   echo "pocket-engineer v$VERSION" ;;
+    list|--list|-l)      cmd_list ;;
+    resume|--resume|-r)  cmd_resume "${2:-}" ;;
+    attach|--attach|-a)  cmd_attach ;;
+    status|--status|-s)  cmd_status ;;
+    qr|--qr)             cmd_qr ;;
+    logs|--logs)         cmd_logs ;;
+    help|--help|-h)      cmd_help ;;
+    version|--version|-v) echo "pocket-engineer v$VERSION" ;;
     "")             cmd_interactive ;;
     -*)             echo "Unknown option: $1"; cmd_help; exit 1 ;;
     *)              cmd_prompt "$1" ;;

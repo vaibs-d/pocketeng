@@ -1,133 +1,699 @@
 #!/bin/bash
-# Pocket Engineer — Start Claude Code on EC2 via tmux
-# Sessions survive laptop disconnection. Pick them up on your phone or reconnect later.
+# Pocket Engineer — Claude Code on your cloud, from anywhere.
+# Sessions run in tmux on EC2, surviving disconnects.
+# Close your laptop, pick up on your phone, or reconnect later.
 #
-# Usage:
-#   pocket-engineer                       # Interactive Claude Code on EC2
-#   pocket-engineer "build a dashboard"   # One-shot prompt (runs in background, survives disconnect)
-#   pocket-engineer --resume <id>         # Resume a Claude session
-#   pocket-engineer --attach              # Reattach to running tmux session
-#   pocket-engineer --list                # List recent Claude sessions
-#   pocket-engineer --status              # Check if Claude is running
+# Install:  brew install pocketengineer/tap/pocket-engineer
+# Start:    pocket-engineer init
+# Docs:     https://github.com/vaibs-d/pocketengineer
 
-set -e
-
-# Config — update these or set env vars
-EC2_HOST="${POCKET_ENGINEER_HOST:-18.207.230.14}"
-EC2_USER="${POCKET_ENGINEER_USER:-ec2-user}"
-SSH_KEY="${POCKET_ENGINEER_KEY:-$HOME/.ssh/claude-remote-key.pem}"
-WORK_DIR="${POCKET_ENGINEER_DIR:-~/projects}"
+VERSION="1.1.0"
+CONFIG_DIR="$HOME/.pocket-engineer"
+CONFIG_FILE="$CONFIG_DIR/config"
 TMUX_SESSION="pocket-engineer"
 
 # Colors
 PURPLE='\033[0;35m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+RED='\033[0;31m'
 DIM='\033[2m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-ssh_cmd() {
-    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ServerAliveInterval=30 "$EC2_USER@$EC2_HOST" "$@"
+# ─── Config ──────────────────────────────────────────────────────────────────
+
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+    EC2_HOST="${POCKET_ENGINEER_HOST:-${PE_HOST:-}}"
+    EC2_USER="${POCKET_ENGINEER_USER:-${PE_USER:-ec2-user}}"
+    SSH_KEY="${POCKET_ENGINEER_KEY:-${PE_KEY:-$HOME/.ssh/pocket-engineer.pem}}"
+    WORK_DIR="${POCKET_ENGINEER_DIR:-${PE_DIR:-~/projects}}"
 }
 
-case "${1:-}" in
-    --list|-l)
-        echo -e "${PURPLE}Pocket Engineer${NC} — Sessions on EC2"
-        echo ""
-        ssh_cmd "
-            for dir in ~/.claude/projects/*/; do
-                for f in \"\$dir\"*.jsonl; do
-                    [ -f \"\$f\" ] || continue
-                    sid=\$(basename \"\$f\" .jsonl)
-                    echo \"\$sid\" | grep -q '^agent-' && continue
-                    first=\$(head -1 \"\$f\" | grep -oP '\"content\":\"\\K[^\"]+' | head -c 80)
-                    last=\$(tail -1 \"\$f\" | grep -oP '\"timestamp\":\"\\K[^\"]+')
-                    printf '  %s  %s  %s\n' \"\${sid:0:8}\" \"\$last\" \"\$first\"
-                done
-            done | sort -k2 -r | head -10
-        "
-        echo ""
-        echo -e "${DIM}Resume with: pocket-engineer --resume <session-id>${NC}"
-        ;;
+save_config() {
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_FILE" << EOF
+# Pocket Engineer CLI config
+PE_HOST="$EC2_HOST"
+PE_USER="$EC2_USER"
+PE_KEY="$SSH_KEY"
+PE_DIR="$WORK_DIR"
+EOF
+    chmod 600 "$CONFIG_FILE"
+}
 
-    --resume|-r)
-        if [ -z "${2:-}" ]; then
-            echo "Usage: pocket-engineer --resume <session-id>"
+require_config() {
+    if [ -z "$EC2_HOST" ]; then
+        echo -e "${RED}Not configured.${NC} Run ${BOLD}pocket-engineer init${NC} to provision, or ${BOLD}pocket-engineer setup${NC} to connect to an existing EC2."
+        exit 1
+    fi
+}
+
+# ─── SSH ─────────────────────────────────────────────────────────────────────
+
+ssh_cmd() {
+    ssh -i "$SSH_KEY" \
+        -o StrictHostKeyChecking=no \
+        -o ServerAliveInterval=30 \
+        -o ConnectTimeout=10 \
+        "$EC2_USER@$EC2_HOST" "$@"
+}
+
+# ─── QR Code ─────────────────────────────────────────────────────────────────
+
+generate_qr() {
+    local data="$1"
+    python3 -c "
+import sys
+data = sys.argv[1]
+try:
+    import qrcode
+    qr = qrcode.QRCode(version=None, box_size=1, border=1, error_correction=qrcode.constants.ERROR_CORRECT_L)
+    qr.add_data(data)
+    qr.make(fit=True)
+    m = qr.modules
+    for r in range(0, len(m) - 1, 2):
+        line = '  '
+        for c in range(len(m[r])):
+            top, bot = m[r][c], m[r+1][c] if r+1 < len(m) else False
+            if top and bot: line += chr(0x2588)
+            elif top: line += chr(0x2580)
+            elif bot: line += chr(0x2584)
+            else: line += ' '
+        print(line)
+    if len(m) % 2 == 1:
+        print('  ' + ''.join(chr(0x2580) if m[-1][c] else ' ' for c in range(len(m[-1]))))
+except ImportError:
+    import subprocess
+    print('  Installing qrcode library...')
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'qrcode'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import qrcode
+    qr = qrcode.QRCode(version=None, box_size=1, border=1, error_correction=qrcode.constants.ERROR_CORRECT_L)
+    qr.add_data(data)
+    qr.make(fit=True)
+    m = qr.modules
+    for r in range(0, len(m) - 1, 2):
+        line = '  '
+        for c in range(len(m[r])):
+            top, bot = m[r][c], m[r+1][c] if r+1 < len(m) else False
+            if top and bot: line += chr(0x2588)
+            elif top: line += chr(0x2580)
+            elif bot: line += chr(0x2584)
+            else: line += ' '
+        print(line)
+    if len(m) % 2 == 1:
+        print('  ' + ''.join(chr(0x2580) if m[-1][c] else ' ' for c in range(len(m[-1]))))
+" "$data" 2>/dev/null
+}
+
+# ─── Init: Provision new EC2 ────────────────────────────────────────────────
+
+cmd_init() {
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Initialize your cloud dev environment"
+    echo ""
+
+    if ! command -v aws &>/dev/null; then
+        echo -e "${RED}AWS CLI required.${NC} Install: brew install awscli"
+        exit 1
+    fi
+
+    # Step 1: AWS credentials
+    echo -e "${BOLD}Step 1: AWS Credentials${NC}"
+    echo -e "${DIM}We'll create an EC2 in your account. You own everything.${NC}"
+    echo ""
+
+    read -p "  AWS Access Key ID: " PE_AWS_KEY
+    read -sp "  AWS Secret Access Key: " PE_AWS_SECRET
+    echo ""
+    read -p "  Region [us-east-1]: " PE_AWS_REGION
+    PE_AWS_REGION="${PE_AWS_REGION:-us-east-1}"
+    echo ""
+
+    echo -n "  Validating... "
+    if ! AWS_ACCESS_KEY_ID="$PE_AWS_KEY" AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET" \
+         aws sts get-caller-identity --region "$PE_AWS_REGION" &>/dev/null; then
+        echo -e "${RED}Invalid credentials${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Valid${NC}"
+    echo ""
+
+    # Step 2: Anthropic key
+    echo -e "${BOLD}Step 2: Anthropic API Key${NC}"
+    echo -e "${DIM}Powers Claude Code. Get one at console.anthropic.com${NC}"
+    echo ""
+    read -sp "  API Key (sk-ant-...): " PE_ANTHROPIC_KEY
+    echo ""
+    echo ""
+
+    # Step 3: Tools
+    echo -e "${BOLD}Step 3: Your Toolchain${NC}"
+    echo -e "${DIM}Claude Code, Node.js, Python, Git, tmux are always installed.${NC}"
+    echo ""
+
+    PE_GITHUB="n"; PE_GITHUB_TOKEN=""
+    PE_VERCEL="n"; PE_VERCEL_TOKEN=""
+    PE_SUPABASE="n"; PE_SUPABASE_TOKEN=""
+    PE_DOCKER="n"
+    PE_CODEX="n"; PE_OPENAI_KEY=""
+    PE_AWSCLI="y"
+
+    read -p "  GitHub CLI?   [y/N] " PE_GITHUB; PE_GITHUB="${PE_GITHUB:-n}"
+    [[ "$PE_GITHUB" =~ ^[Yy] ]] && read -p "    Token (optional, Enter to skip): " PE_GITHUB_TOKEN
+
+    read -p "  Vercel?       [y/N] " PE_VERCEL; PE_VERCEL="${PE_VERCEL:-n}"
+    [[ "$PE_VERCEL" =~ ^[Yy] ]] && read -p "    Token (optional): " PE_VERCEL_TOKEN
+
+    read -p "  Supabase?     [y/N] " PE_SUPABASE; PE_SUPABASE="${PE_SUPABASE:-n}"
+    [[ "$PE_SUPABASE" =~ ^[Yy] ]] && read -p "    Token (optional): " PE_SUPABASE_TOKEN
+
+    read -p "  Docker?       [y/N] " PE_DOCKER; PE_DOCKER="${PE_DOCKER:-n}"
+
+    read -p "  OpenAI Codex? [y/N] " PE_CODEX; PE_CODEX="${PE_CODEX:-n}"
+    [[ "$PE_CODEX" =~ ^[Yy] ]] && read -p "    API key (optional): " PE_OPENAI_KEY
+
+    read -p "  AWS CLI?      [Y/n] " PE_AWSCLI; PE_AWSCLI="${PE_AWSCLI:-y}"
+
+    echo ""
+    echo -e "${BOLD}Step 4: Launching${NC}"
+    echo ""
+
+    export AWS_ACCESS_KEY_ID="$PE_AWS_KEY"
+    export AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET"
+    export AWS_DEFAULT_REGION="$PE_AWS_REGION"
+
+    local KEY_NAME="pe-$(openssl rand -hex 4)"
+    local SG_NAME="pe-$(openssl rand -hex 4)"
+    mkdir -p "$CONFIG_DIR"
+    local KEY_FILE="$CONFIG_DIR/${KEY_NAME}.pem"
+
+    # Create key pair
+    echo -n "  Creating SSH key pair... "
+    aws ec2 create-key-pair \
+        --key-name "$KEY_NAME" --key-type ed25519 \
+        --query 'KeyMaterial' --output text > "$KEY_FILE" 2>/dev/null
+    chmod 600 "$KEY_FILE"
+    echo -e "${GREEN}done${NC}"
+
+    # Security group
+    echo -n "  Creating security group... "
+    local SG_ID
+    SG_ID=$(aws ec2 create-security-group \
+        --group-name "$SG_NAME" \
+        --description "Pocket Engineer" \
+        --query 'GroupId' --output text 2>/dev/null)
+    aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr 0.0.0.0/0 &>/dev/null
+    aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8080 --cidr 0.0.0.0/0 &>/dev/null
+    [[ "$PE_DOCKER" =~ ^[Yy] ]] && aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 3000 --cidr 0.0.0.0/0 &>/dev/null
+    echo -e "${GREEN}$SG_ID${NC}"
+
+    # AMI
+    echo -n "  Finding AMI... "
+    local AMI_ID
+    AMI_ID=$(aws ec2 describe-images --owners amazon \
+        --filters "Name=name,Values=al2023-ami-2023*-x86_64" "Name=state,Values=available" \
+        --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' --output text 2>/dev/null)
+    if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
+        case "$PE_AWS_REGION" in
+            us-east-1) AMI_ID="ami-0c02fb55956c7d316" ;;
+            us-west-2) AMI_ID="ami-0dc8f589abe99f538" ;;
+            *) echo -e "${RED}No AMI for $PE_AWS_REGION${NC}"; exit 1 ;;
+        esac
+    fi
+    echo -e "${GREEN}$AMI_ID${NC}"
+
+    # Build user-data script as a temp file (avoids shell quoting hell)
+    local USERDATA_FILE
+    USERDATA_FILE=$(mktemp)
+
+    cat > "$USERDATA_FILE" << 'BASE_EOF'
+#!/bin/bash
+exec > /var/log/pocket-engineer-setup.log 2>&1
+echo "=== Pocket Engineer setup started ==="
+
+# Base packages
+echo "--- Installing base packages ---"
+dnf install -y nodejs20 npm git tmux python3 python3-pip jq tar gzip unzip which
+
+echo "--- Installing Claude Code ---"
+npm install -g @anthropic-ai/claude-code
+
+echo "--- Installing Python packages ---"
+pip3 install flask requests boto3 || true
+
+BASE_EOF
+
+    # GitHub CLI
+    if [[ "$PE_GITHUB" =~ ^[Yy] ]]; then
+        cat >> "$USERDATA_FILE" << 'GH_EOF'
+echo "--- Installing GitHub CLI ---"
+dnf install -y https://github.com/cli/cli/releases/download/v2.67.0/gh_2.67.0_linux_amd64.rpm || echo "WARN: gh install failed"
+GH_EOF
+        if [ -n "$PE_GITHUB_TOKEN" ]; then
+            cat >> "$USERDATA_FILE" << GHTOKEN_EOF
+su - ec2-user -c 'mkdir -p ~/.config/gh && cat > ~/.config/gh/hosts.yml << GHCFG
+github.com:
+    oauth_token: $PE_GITHUB_TOKEN
+    user: ""
+    git_protocol: https
+GHCFG'
+GHTOKEN_EOF
+        fi
+    fi
+
+    # Vercel
+    if [[ "$PE_VERCEL" =~ ^[Yy] ]]; then
+        cat >> "$USERDATA_FILE" << 'VERCEL_EOF'
+echo "--- Installing Vercel ---"
+npm install -g vercel || echo "WARN: vercel install failed"
+VERCEL_EOF
+        if [ -n "$PE_VERCEL_TOKEN" ]; then
+            echo "echo 'export VERCEL_TOKEN=$PE_VERCEL_TOKEN' >> /home/ec2-user/.bashrc" >> "$USERDATA_FILE"
+        fi
+    fi
+
+    # Supabase
+    if [[ "$PE_SUPABASE" =~ ^[Yy] ]]; then
+        cat >> "$USERDATA_FILE" << 'SUPA_EOF'
+echo "--- Installing Supabase ---"
+npm install -g supabase || echo "WARN: supabase install failed"
+SUPA_EOF
+        if [ -n "$PE_SUPABASE_TOKEN" ]; then
+            echo "echo 'export SUPABASE_ACCESS_TOKEN=$PE_SUPABASE_TOKEN' >> /home/ec2-user/.bashrc" >> "$USERDATA_FILE"
+        fi
+    fi
+
+    # Docker
+    if [[ "$PE_DOCKER" =~ ^[Yy] ]]; then
+        cat >> "$USERDATA_FILE" << 'DOCKER_EOF'
+echo "--- Installing Docker ---"
+dnf install -y docker || echo "WARN: docker install failed"
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ec2-user
+DOCKER_EOF
+    fi
+
+    # OpenAI Codex
+    if [[ "$PE_CODEX" =~ ^[Yy] ]]; then
+        cat >> "$USERDATA_FILE" << 'CODEX_EOF'
+echo "--- Installing OpenAI Codex ---"
+npm install -g @openai/codex || echo "WARN: codex install failed"
+CODEX_EOF
+        if [ -n "$PE_OPENAI_KEY" ]; then
+            echo "echo 'export OPENAI_API_KEY=$PE_OPENAI_KEY' >> /home/ec2-user/.bashrc" >> "$USERDATA_FILE"
+        fi
+    fi
+
+    # AWS CLI
+    if [[ "$PE_AWSCLI" =~ ^[Yy] ]]; then
+        cat >> "$USERDATA_FILE" << AWSCLI_EOF
+echo "--- Installing AWS CLI ---"
+curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip || echo "WARN: awscli install failed"
+echo 'export AWS_ACCESS_KEY_ID=$PE_AWS_KEY' >> /home/ec2-user/.bashrc
+echo 'export AWS_SECRET_ACCESS_KEY=$PE_AWS_SECRET' >> /home/ec2-user/.bashrc
+echo 'export AWS_DEFAULT_REGION=$PE_AWS_REGION' >> /home/ec2-user/.bashrc
+AWSCLI_EOF
+    fi
+
+    # Always: Anthropic key, project dir, git config, tmux, ready marker
+    cat >> "$USERDATA_FILE" << FINAL_EOF
+echo "--- Configuring environment ---"
+echo 'export ANTHROPIC_API_KEY=$PE_ANTHROPIC_KEY' >> /home/ec2-user/.bashrc
+mkdir -p /home/ec2-user/projects && chown -R ec2-user:ec2-user /home/ec2-user/projects
+su - ec2-user -c 'git config --global user.name "Pocket Engineer"'
+su - ec2-user -c 'git config --global user.email "dev@pocketengineer.dev"'
+
+cat > /home/ec2-user/.tmux.conf << 'TMUXEOF'
+set -g mouse on
+set -g history-limit 50000
+set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
+TMUXEOF
+chown ec2-user:ec2-user /home/ec2-user/.tmux.conf
+
+echo "=== Verifying installations ==="
+echo "node: \$(node --version 2>/dev/null || echo MISSING)"
+echo "npm: \$(npm --version 2>/dev/null || echo MISSING)"
+echo "claude: \$(which claude 2>/dev/null || echo MISSING)"
+echo "git: \$(git --version 2>/dev/null || echo MISSING)"
+echo "python3: \$(python3 --version 2>/dev/null || echo MISSING)"
+command -v gh &>/dev/null && echo "gh: \$(gh --version 2>/dev/null | head -1)" || true
+command -v docker &>/dev/null && echo "docker: \$(docker --version 2>/dev/null)" || true
+command -v vercel &>/dev/null && echo "vercel: installed" || true
+command -v aws &>/dev/null && echo "aws: \$(aws --version 2>/dev/null)" || true
+
+echo "=== Setup complete ==="
+touch /home/ec2-user/.pocket-engineer-ready
+FINAL_EOF
+
+    # Launch
+    echo -n "  Launching EC2 (t3.medium)... "
+    local INSTANCE_ID
+    INSTANCE_ID=$(aws ec2 run-instances \
+        --image-id "$AMI_ID" --instance-type t3.medium \
+        --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
+        --user-data "file://$USERDATA_FILE" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=PocketEngineer},{Key=ManagedBy,Value=PocketEngineer}]" \
+        --query 'Instances[0].InstanceId' --output text 2>/dev/null)
+    rm -f "$USERDATA_FILE"
+    echo -e "${GREEN}$INSTANCE_ID${NC}"
+
+    # Wait for IP
+    echo -n "  Waiting for public IP"
+    local PUBLIC_IP=""
+    for _ in $(seq 1 30); do
+        sleep 10
+        echo -n "."
+        PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null)
+        [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "None" ] && break
+    done
+    if [ -z "$PUBLIC_IP" ] || [ "$PUBLIC_IP" = "None" ]; then
+        echo -e " ${RED}failed${NC}"; exit 1
+    fi
+    echo -e " ${GREEN}$PUBLIC_IP${NC}"
+
+    # Wait for setup completion
+    echo -n "  Installing tools"
+    for _ in $(seq 1 36); do
+        sleep 5
+        echo -n "."
+        if ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes \
+           "ec2-user@$PUBLIC_IP" "test -f ~/.pocket-engineer-ready" &>/dev/null 2>&1; then
+            break
+        fi
+    done
+    echo -e " ${GREEN}done${NC}"
+
+    # Show what was installed
+    echo ""
+    echo -e "  ${BOLD}Installed tools:${NC}"
+    local INSTALL_LOG
+    INSTALL_LOG=$(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+        "ec2-user@$PUBLIC_IP" "grep -E '^(node|npm|claude|git|python3|gh|docker|vercel|aws):' /var/log/pocket-engineer-setup.log 2>/dev/null" 2>/dev/null || true)
+    if [ -n "$INSTALL_LOG" ]; then
+        while IFS= read -r line; do
+            echo -e "    ${GREEN}✓${NC} $line"
+        done <<< "$INSTALL_LOG"
+    else
+        echo -e "    ${DIM}(log not available yet — tools are installing in background)${NC}"
+    fi
+
+    # Save config
+    EC2_HOST="$PUBLIC_IP"
+    EC2_USER="ec2-user"
+    SSH_KEY="$KEY_FILE"
+    WORK_DIR="~/projects"
+    save_config
+
+    echo ""
+    echo -e "${GREEN}${BOLD}  Your dev environment is ready!${NC}"
+    echo ""
+    echo -e "  Host:      ${BOLD}$PUBLIC_IP${NC}"
+    echo -e "  SSH Key:   ${DIM}$KEY_FILE${NC}"
+    echo -e "  Instance:  ${DIM}$INSTANCE_ID${NC}"
+    echo ""
+    echo -e "  ${BOLD}Laptop:${NC}  pocket-engineer"
+    echo -e "  ${BOLD}Phone:${NC}   Scan the QR code below in the Pocket Engineer app"
+    echo ""
+
+    # QR code for phone app
+    local KEY_B64
+    KEY_B64=$(base64 < "$KEY_FILE" | tr -d '\n')
+    local QR_DATA="pe://$PUBLIC_IP:22?key=$KEY_B64"
+
+    echo -e "  ${PURPLE}${BOLD}Scan with Pocket Engineer app:${NC}"
+    echo ""
+    generate_qr "$QR_DATA"
+    echo ""
+    echo -e "  ${DIM}Or enter manually in app — Host: $PUBLIC_IP${NC}"
+    echo ""
+}
+
+# ─── Setup: Connect to existing EC2 ─────────────────────────────────────────
+
+cmd_setup() {
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Connect to existing EC2"
+    echo ""
+
+    read -p "  EC2 host (IP or hostname): " input_host
+    [ -z "$input_host" ] && echo "Host is required." && exit 1
+    EC2_HOST="$input_host"
+
+    read -p "  SSH user [ec2-user]: " input_user
+    EC2_USER="${input_user:-ec2-user}"
+
+    local default_key="$HOME/.ssh/pocket-engineer.pem"
+    read -p "  SSH key path [$default_key]: " input_key
+    SSH_KEY="${input_key:-$default_key}"
+    [ ! -f "$SSH_KEY" ] && echo -e "  ${YELLOW}Warning: Key not found at $SSH_KEY${NC}"
+
+    read -p "  Working directory [~/projects]: " input_dir
+    WORK_DIR="${input_dir:-~/projects}"
+
+    save_config
+    echo ""
+    echo -n "  Testing connection... "
+    if ssh_cmd -o BatchMode=yes "echo ok" &>/dev/null; then
+        echo -e "${GREEN}Connected!${NC}"
+        echo -e "  Run ${BOLD}pocket-engineer${NC} to start."
+    else
+        echo -e "${YELLOW}Could not connect${NC}"
+    fi
+}
+
+# ─── Session Commands ────────────────────────────────────────────────────────
+
+cmd_interactive() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Interactive mode"
+    echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
+    echo -e "${DIM}Reattach: pocket-engineer --attach | Phone: open Pocket Engineer app${NC}"
+    echo ""
+    ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude'"
+}
+
+cmd_prompt() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Sending prompt..."
+    echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
+    echo ""
+    ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude -p '\"'\"'$1'\"'\"' --verbose'"
+}
+
+cmd_resume() {
+    require_config
+    local sid="$1"
+    [ -z "$sid" ] && echo "Usage: pocket-engineer --resume <session-id>" && exit 1
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Resuming ${sid:0:8}..."
+    ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude --resume \"$sid\"'"
+}
+
+cmd_attach() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Reattaching..."
+    ssh_cmd -t "tmux attach-session -t $TMUX_SESSION 2>/dev/null || echo 'No active session. Start one with: pocket-engineer'"
+}
+
+cmd_list() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Sessions"
+    echo ""
+    ssh_cmd "
+        for dir in ~/.claude/projects/*/; do
+            for f in \"\$dir\"*.jsonl; do
+                [ -f \"\$f\" ] || continue
+                sid=\$(basename \"\$f\" .jsonl)
+                echo \"\$sid\" | grep -q '^agent-' && continue
+                first=\$(head -1 \"\$f\" | grep -oP '\"content\":\"\\K[^\"]+' | head -c 80)
+                last=\$(tail -1 \"\$f\" | grep -oP '\"timestamp\":\"\\K[^\"]+')
+                printf '  %s  %s  %s\n' \"\${sid:0:8}\" \"\$last\" \"\$first\"
+            done
+        done | sort -k2 -r | head -10
+    "
+    echo ""
+    echo -e "${DIM}Resume: pocket-engineer --resume <id>${NC}"
+}
+
+cmd_status() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Status"
+    local state
+    state=$(ssh_cmd "tmux has-session -t $TMUX_SESSION 2>/dev/null && echo 'RUNNING' || echo 'STOPPED'")
+    if [ "$state" = "RUNNING" ]; then
+        echo -e "  ${GREEN}●${NC} Claude running on ${DIM}$EC2_HOST${NC}"
+    else
+        echo -e "  ○ No active session on ${DIM}$EC2_HOST${NC}"
+    fi
+}
+
+cmd_logs() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Setup Log"
+    echo ""
+    ssh_cmd "cat /var/log/pocket-engineer-setup.log 2>/dev/null || echo 'Setup log not found'"
+}
+
+cmd_qr() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Phone QR Code"
+    echo ""
+    local KEY_B64
+    KEY_B64=$(base64 < "$SSH_KEY" | tr -d '\n')
+    generate_qr "pe://$EC2_HOST:22?key=$KEY_B64"
+    echo ""
+    echo -e "  ${DIM}Scan with the Pocket Engineer iOS app${NC}"
+    echo ""
+}
+
+cmd_sync() {
+    require_config
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Sync session to EC2"
+    echo ""
+
+    # Detect current project directory
+    local PROJECT_DIR
+    PROJECT_DIR="${2:-$(pwd)}"
+    echo -e "  Project:  ${BOLD}$PROJECT_DIR${NC}"
+
+    # Find Claude session dir — check this dir and walk up parents
+    local SESSION_DIR=""
+    local SEARCH_DIR="$PROJECT_DIR"
+    while [ "$SEARCH_DIR" != "/" ]; do
+        local SAFE_DIR
+        SAFE_DIR=$(echo "$SEARCH_DIR" | sed 's|/|-|g')
+        local CANDIDATE="$HOME/.claude/projects/$SAFE_DIR"
+        if [ -d "$CANDIDATE" ] && ls "$CANDIDATE"/*.jsonl &>/dev/null; then
+            SESSION_DIR="$CANDIDATE"
+            echo -e "  Sessions: ${DIM}$CANDIDATE${NC}"
+            break
+        fi
+        SEARCH_DIR=$(dirname "$SEARCH_DIR")
+    done
+
+    if [ -z "$SESSION_DIR" ]; then
+        echo -e "  ${RED}No Claude sessions found for this project${NC}"
+        echo -e "  ${DIM}Searched from: $PROJECT_DIR up to /${NC}"
+        exit 1
+    fi
+
+    # Find most recent session (or use specified session ID)
+    local SESSION_ID="${3:-}"
+    local SESSION_FILE
+    if [ -n "$SESSION_ID" ]; then
+        SESSION_FILE="$SESSION_DIR/$SESSION_ID.jsonl"
+        if [ ! -f "$SESSION_FILE" ]; then
+            echo -e "  ${RED}Session $SESSION_ID not found${NC}"
             exit 1
         fi
-        echo -e "${PURPLE}Pocket Engineer${NC} — Resuming session ${2:0:8}..."
-        echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
-        echo -e "${DIM}Pick up on your phone with the ↓ button.${NC}"
-        echo ""
-        ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude --resume \"$2\"'"
-        ;;
-
-    --attach|-a)
-        echo -e "${PURPLE}Pocket Engineer${NC} — Reattaching..."
-        ssh_cmd -t "tmux attach-session -t $TMUX_SESSION 2>/dev/null || echo 'No active session. Start one with: pocket-engineer'"
-        ;;
-
-    --status|-s)
-        echo -e "${PURPLE}Pocket Engineer${NC} — Status"
-        RUNNING=$(ssh_cmd "tmux has-session -t $TMUX_SESSION 2>/dev/null && echo 'RUNNING' || echo 'STOPPED'")
-        if [ "$RUNNING" = "RUNNING" ]; then
-            echo -e "  ${GREEN}●${NC} Claude is running on EC2"
-            echo -e "  ${DIM}Reattach with: pocket-engineer --attach${NC}"
-        else
-            echo -e "  ○ No active session"
-            echo -e "  ${DIM}Start with: pocket-engineer${NC}"
+    else
+        SESSION_FILE=$(ls -t "$SESSION_DIR"/*.jsonl 2>/dev/null | head -1)
+        if [ -z "$SESSION_FILE" ]; then
+            echo -e "  ${RED}No sessions found${NC}"
+            exit 1
         fi
-        ;;
+        SESSION_ID=$(basename "$SESSION_FILE" .jsonl)
+    fi
 
-    --detach|-d)
-        echo -e "${PURPLE}Pocket Engineer${NC} — Detaching (session keeps running)"
-        echo -e "${DIM}Reattach with: pocket-engineer --attach${NC}"
-        echo -e "${DIM}Or pick up on your phone.${NC}"
-        # Just disconnect — tmux keeps running
-        ;;
+    local SESSION_SIZE
+    SESSION_SIZE=$(du -sh "$SESSION_FILE" | cut -f1)
+    echo -e "  Session:  ${BOLD}${SESSION_ID:0:8}...${NC} ${DIM}($SESSION_SIZE)${NC}"
+    echo ""
 
-    --help|-h)
-        echo "Pocket Engineer — Claude Code on EC2"
-        echo ""
-        echo "Usage:"
-        echo "  pocket-engineer                      Interactive Claude (in tmux)"
-        echo "  pocket-engineer \"build X\"             Send prompt (in tmux)"
-        echo "  pocket-engineer --resume <id>         Resume a Claude session"
-        echo "  pocket-engineer --attach              Reattach to running session"
-        echo "  pocket-engineer --status              Check if Claude is running"
-        echo "  pocket-engineer --list                List recent sessions"
-        echo ""
-        echo "How it works:"
-        echo "  Sessions run inside tmux on EC2, so they survive if you:"
-        echo "  - Close your laptop lid"
-        echo "  - Lose WiFi"
-        echo "  - Switch to your phone"
-        echo ""
-        echo "  Just run 'pocket-engineer --attach' to reconnect, or"
-        echo "  pick up the session on your phone with Pocket Engineer app."
-        echo ""
-        echo "Environment variables:"
-        echo "  POCKET_ENGINEER_HOST    EC2 hostname (default: 18.207.230.14)"
-        echo "  POCKET_ENGINEER_USER    SSH user (default: ec2-user)"
-        echo "  POCKET_ENGINEER_KEY     SSH key path (default: ~/.ssh/claude-remote-key.pem)"
-        echo "  POCKET_ENGINEER_DIR     Working directory (default: ~/projects)"
-        ;;
+    # Step 1: Sync code to EC2
+    echo -n "  Syncing code to EC2... "
+    local REMOTE_PROJECT="$WORK_DIR/$(basename "$PROJECT_DIR")"
+    ssh_cmd "mkdir -p '$REMOTE_PROJECT'" 2>/dev/null
 
-    "")
-        echo -e "${PURPLE}Pocket Engineer${NC} — Interactive mode"
-        echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
-        echo -e "${DIM}Reattach: pocket-engineer --attach${NC}"
-        echo -e "${DIM}Pick up on phone: tap ↓ in the app${NC}"
-        echo ""
-        # Kill old tmux session if exists, start fresh
-        ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude'"
-        ;;
+    rsync -azq --delete \
+        --exclude '.git' \
+        --exclude 'node_modules' \
+        --exclude '.build' \
+        --exclude 'DerivedData' \
+        --exclude '*.xcodeproj' \
+        --exclude '.DS_Store' \
+        --exclude 'Pods' \
+        --exclude 'build' \
+        -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+        "$PROJECT_DIR/" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/" 2>/dev/null
+    echo -e "${GREEN}done${NC}"
 
-    *)
-        echo -e "${PURPLE}Pocket Engineer${NC} — Sending prompt..."
-        echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
-        echo -e "${DIM}Reattach: pocket-engineer --attach${NC}"
-        echo ""
-        ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude -p '\"'\"'$1'\"'\"' --verbose'"
-        ;;
+    # Step 2: Copy session file to EC2
+    echo -n "  Syncing session context... "
+    local REMOTE_SAFE_DIR
+    REMOTE_SAFE_DIR=$(echo "$REMOTE_PROJECT" | sed 's|~|/home/'"$EC2_USER"'|' | sed 's|/|-|g')
+    local REMOTE_SESSION_DIR="/home/$EC2_USER/.claude/projects/$REMOTE_SAFE_DIR"
+
+    ssh_cmd "mkdir -p '$REMOTE_SESSION_DIR'" 2>/dev/null
+
+    # Also copy CLAUDE.md if it exists
+    if [ -f "$PROJECT_DIR/CLAUDE.md" ]; then
+        rsync -azq \
+            -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+            "$PROJECT_DIR/CLAUDE.md" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/CLAUDE.md" 2>/dev/null
+    fi
+
+    rsync -azq \
+        -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+        "$SESSION_FILE" "$EC2_USER@$EC2_HOST:$REMOTE_SESSION_DIR/" 2>/dev/null
+    echo -e "${GREEN}done${NC}"
+
+    echo ""
+    echo -e "${GREEN}${BOLD}  Synced!${NC}"
+    echo ""
+    echo -e "  Remote project: ${DIM}$REMOTE_PROJECT${NC}"
+    echo -e "  Session ID:     ${BOLD}$SESSION_ID${NC}"
+    echo ""
+    echo -e "  ${BOLD}Laptop:${NC}  pocket-engineer --resume $SESSION_ID"
+    echo -e "  ${BOLD}Phone:${NC}   Pick Up Session → tap the synced session"
+    echo ""
+}
+
+cmd_help() {
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} v$VERSION — Claude Code on your cloud, from anywhere."
+    echo ""
+    echo "Getting started:"
+    echo "  pocket-engineer init                 Provision a new EC2 dev environment"
+    echo "  pocket-engineer setup                Connect to an existing EC2"
+    echo ""
+    echo "Daily use:"
+    echo "  pocket-engineer                      Interactive Claude Code session"
+    echo "  pocket-engineer \"prompt\"              One-shot prompt"
+    echo "  pocket-engineer attach                Reattach to running session"
+    echo "  pocket-engineer resume <id>           Resume a past session"
+    echo "  pocket-engineer list                  List sessions"
+    echo "  pocket-engineer status                Check if Claude is running"
+    echo "  pocket-engineer qr                    Show QR code for phone app"
+    echo "  pocket-engineer logs                  Show EC2 setup/install log"
+    echo "  pocket-engineer sync [path] [id]      Sync project + session to EC2"
+    echo ""
+    echo "How it works:"
+    echo "  1. Run 'pocket-engineer init' on your laptop"
+    echo "  2. Scan the QR code with the Pocket Engineer app"
+    echo "  3. Code from laptop or phone — sessions survive disconnects"
+}
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+load_config
+
+case "${1:-}" in
+    init)           cmd_init ;;
+    setup)          cmd_setup ;;
+    sync)           cmd_sync "$@" ;;
+    list|--list|-l)      cmd_list ;;
+    resume|--resume|-r)  cmd_resume "${2:-}" ;;
+    attach|--attach|-a)  cmd_attach ;;
+    status|--status|-s)  cmd_status ;;
+    qr|--qr)             cmd_qr ;;
+    logs|--logs)         cmd_logs ;;
+    help|--help|-h)      cmd_help ;;
+    version|--version|-v) echo "pocket-engineer v$VERSION" ;;
+    "")             cmd_interactive ;;
+    -*)             echo "Unknown option: $1"; cmd_help; exit 1 ;;
+    *)              cmd_prompt "$1" ;;
 esac
