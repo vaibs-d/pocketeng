@@ -552,59 +552,52 @@ cmd_qr() {
 
 cmd_sync() {
     require_config
-    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Sync session to EC2"
+    echo -e "${PURPLE}${BOLD}Pocket Engineer${NC} — Sync to EC2"
     echo ""
 
-    # Detect current project directory
     local PROJECT_DIR
     PROJECT_DIR="${2:-$(pwd)}"
     echo -e "  Project:  ${BOLD}$PROJECT_DIR${NC}"
 
-    # Find Claude session dir — check this dir and walk up parents
-    local SESSION_DIR=""
-    local SEARCH_DIR="$PROJECT_DIR"
-    while [ "$SEARCH_DIR" != "/" ]; do
-        local SAFE_DIR
-        SAFE_DIR=$(echo "$SEARCH_DIR" | sed 's|/|-|g')
-        local CANDIDATE="$HOME/.claude/projects/$SAFE_DIR"
-        if [ -d "$CANDIDATE" ] && ls "$CANDIDATE"/*.jsonl &>/dev/null; then
-            SESSION_DIR="$CANDIDATE"
-            echo -e "  Sessions: ${DIM}$CANDIDATE${NC}"
-            break
-        fi
-        SEARCH_DIR=$(dirname "$SEARCH_DIR")
-    done
+    # Step 1: Generate handoff doc from active Claude session
+    echo -n "  Generating handoff from Claude session... "
+    local HANDOFF_FILE="$PROJECT_DIR/.handoff.md"
+    local HANDOFF_PROMPT='Write a concise handoff document for another Claude Code instance that will continue this work. Include:
+1. **Current State**: What has been built/changed so far
+2. **Key Decisions**: Important architectural or design decisions made
+3. **Pending Tasks**: What still needs to be done
+4. **Critical Context**: Anything a new session MUST know (API keys needed, deployment targets, gotchas, user preferences)
+5. **File Map**: Key files and what they do
 
-    if [ -z "$SESSION_DIR" ]; then
-        echo -e "  ${RED}No Claude sessions found for this project${NC}"
-        echo -e "  ${DIM}Searched from: $PROJECT_DIR up to /${NC}"
-        exit 1
-    fi
+Be specific and actionable. No fluff. Write as markdown. Do NOT include any tool calls — just output the document text.'
 
-    # Find most recent session (or use specified session ID)
-    local SESSION_ID="${3:-}"
-    local SESSION_FILE
-    if [ -n "$SESSION_ID" ]; then
-        SESSION_FILE="$SESSION_DIR/$SESSION_ID.jsonl"
-        if [ ! -f "$SESSION_FILE" ]; then
-            echo -e "  ${RED}Session $SESSION_ID not found${NC}"
-            exit 1
-        fi
+    # Try to get Claude to generate the handoff (timeout 60s)
+    local HANDOFF_CONTENT
+    if HANDOFF_CONTENT=$(cd "$PROJECT_DIR" && echo "$HANDOFF_PROMPT" | timeout 120 claude -p - --output-format text 2>/dev/null); then
+        echo "$HANDOFF_CONTENT" > "$HANDOFF_FILE"
+        echo -e "${GREEN}done${NC}"
     else
-        SESSION_FILE=$(ls -t "$SESSION_DIR"/*.jsonl 2>/dev/null | head -1)
-        if [ -z "$SESSION_FILE" ]; then
-            echo -e "  ${RED}No sessions found${NC}"
-            exit 1
-        fi
-        SESSION_ID=$(basename "$SESSION_FILE" .jsonl)
+        echo -e "${YELLOW}skipped${NC} ${DIM}(no active session or Claude unavailable)${NC}"
     fi
 
-    local SESSION_SIZE
-    SESSION_SIZE=$(du -sh "$SESSION_FILE" | cut -f1)
-    echo -e "  Session:  ${BOLD}${SESSION_ID:0:8}...${NC} ${DIM}($SESSION_SIZE)${NC}"
+    # Step 2: Ask user for custom notes
+    echo ""
+    echo -e "  ${DIM}Add any notes for the remote session (Enter to skip):${NC}"
+    read -r -p "  > " USER_NOTES
+    if [ -n "$USER_NOTES" ]; then
+        if [ -f "$HANDOFF_FILE" ]; then
+            echo "" >> "$HANDOFF_FILE"
+            echo "## User Notes" >> "$HANDOFF_FILE"
+            echo "$USER_NOTES" >> "$HANDOFF_FILE"
+        else
+            echo "## User Notes" > "$HANDOFF_FILE"
+            echo "$USER_NOTES" >> "$HANDOFF_FILE"
+        fi
+        echo -e "  ${GREEN}Notes added${NC}"
+    fi
     echo ""
 
-    # Step 1: Sync code to EC2
+    # Step 3: Sync code to EC2
     echo -n "  Syncing code to EC2... "
     local REMOTE_PROJECT="$WORK_DIR/$(basename "$PROJECT_DIR")"
     ssh_cmd "mkdir -p '$REMOTE_PROJECT'" 2>/dev/null
@@ -622,34 +615,31 @@ cmd_sync() {
         "$PROJECT_DIR/" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/" 2>/dev/null
     echo -e "${GREEN}done${NC}"
 
-    # Step 2: Copy session file to EC2
-    echo -n "  Syncing session context... "
-    local REMOTE_SAFE_DIR
-    REMOTE_SAFE_DIR=$(echo "$REMOTE_PROJECT" | sed 's|~|/home/'"$EC2_USER"'|' | sed 's|/|-|g')
-    local REMOTE_SESSION_DIR="/home/$EC2_USER/.claude/projects/$REMOTE_SAFE_DIR"
-
-    ssh_cmd "mkdir -p '$REMOTE_SESSION_DIR'" 2>/dev/null
-
-    # Also copy CLAUDE.md if it exists
+    # Step 4: Copy CLAUDE.md and handoff to EC2
+    echo -n "  Syncing context files... "
     if [ -f "$PROJECT_DIR/CLAUDE.md" ]; then
         rsync -azq \
             -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
             "$PROJECT_DIR/CLAUDE.md" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/CLAUDE.md" 2>/dev/null
     fi
-
-    rsync -azq \
-        -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-        "$SESSION_FILE" "$EC2_USER@$EC2_HOST:$REMOTE_SESSION_DIR/" 2>/dev/null
+    if [ -f "$HANDOFF_FILE" ]; then
+        rsync -azq \
+            -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+            "$HANDOFF_FILE" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/.handoff.md" 2>/dev/null
+    fi
     echo -e "${GREEN}done${NC}"
 
     echo ""
     echo -e "${GREEN}${BOLD}  Synced!${NC}"
     echo ""
     echo -e "  Remote project: ${DIM}$REMOTE_PROJECT${NC}"
-    echo -e "  Session ID:     ${BOLD}$SESSION_ID${NC}"
+    if [ -f "$HANDOFF_FILE" ]; then
+        local HANDOFF_SIZE
+        HANDOFF_SIZE=$(du -sh "$HANDOFF_FILE" | cut -f1)
+        echo -e "  Handoff:        ${DIM}.handoff.md ($HANDOFF_SIZE)${NC}"
+    fi
     echo ""
-    echo -e "  ${BOLD}Laptop:${NC}  pocket-engineer --resume $SESSION_ID"
-    echo -e "  ${BOLD}Phone:${NC}   Pick Up Session → tap the synced session"
+    echo -e "  ${BOLD}Phone:${NC} Open project → new session → Claude will read .handoff.md"
     echo ""
 }
 
