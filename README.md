@@ -40,13 +40,18 @@ You own the machine, the keys, and the code.
 ## Install
 
 ```bash
-brew tap vaibs-d/pocketengineer https://github.com/vaibs-d/pocketengineer
-brew install pocket-engineer
+curl -fsSL https://pocketeng.co/install | sh
 ```
 
 <details>
-<summary>Manual install (no Homebrew)</summary>
+<summary>Other methods</summary>
 
+**Homebrew:**
+```bash
+brew install vaibs-d/pocketengineer/pocket-engineer
+```
+
+**Manual:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vaibs-d/pocketengineer/main/pocket-engineer \
   -o /usr/local/bin/pocket-engineer && chmod +x /usr/local/bin/pocket-engineer
