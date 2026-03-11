@@ -8,11 +8,12 @@
   Sessions survive disconnects — close your laptop, pick up on your phone.
   <br />
   <br />
-  <a href="#install">Install</a> &nbsp;&bull;&nbsp;
-  <a href="#quick-start">Quick Start</a> &nbsp;&bull;&nbsp;
-  <a href="#commands">Commands</a> &nbsp;&bull;&nbsp;
-  <a href="#how-it-works">How It Works</a> &nbsp;&bull;&nbsp;
-  <a href="#companion-app">iOS App</a>
+  <a href="docs/getting-started.md">Getting Started</a> &nbsp;&bull;&nbsp;
+  <a href="docs/syncing.md">Syncing</a> &nbsp;&bull;&nbsp;
+  <a href="docs/commands.md">Commands</a> &nbsp;&bull;&nbsp;
+  <a href="docs/multi-server.md">Multi-server</a> &nbsp;&bull;&nbsp;
+  <a href="docs/phone-app.md">Phone App</a> &nbsp;&bull;&nbsp;
+  <a href="docs/mcp-server.md">MCP</a>
   <br />
   <br />
 </p>
