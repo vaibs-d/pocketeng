@@ -9,6 +9,7 @@
   <br />
   <br />
   <a href="docs/getting-started.md">Getting Started</a> &nbsp;&bull;&nbsp;
+  <a href="docs/how-it-works.md">How It Works</a> &nbsp;&bull;&nbsp;
   <a href="docs/syncing.md">Syncing</a> &nbsp;&bull;&nbsp;
   <a href="docs/commands.md">Commands</a> &nbsp;&bull;&nbsp;
   <a href="docs/multi-server.md">Multi-server</a> &nbsp;&bull;&nbsp;
