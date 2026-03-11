@@ -65,7 +65,11 @@ function loadConfig(profileName) {
   if (existsSync(profileFile)) {
     return parseConfFile(profileFile);
   }
-  // Fall back to legacy config
+  // If an explicit profile was requested but not found, don't fall back
+  if (profileName) {
+    return null;
+  }
+  // Fall back to legacy config only for default/auto resolution
   if (existsSync(LEGACY_CONFIG)) {
     return parseConfFile(LEGACY_CONFIG);
   }

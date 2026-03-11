@@ -51,6 +51,11 @@ load_config() {
     local pfile="$SERVERS_DIR/${profile}.conf"
     if [ -f "$pfile" ]; then
         source "$pfile"
+    elif [ -n "$SERVER_OVERRIDE" ]; then
+        echo -e "${RED}Server '$SERVER_OVERRIDE' not found.${NC}"
+        echo ""
+        cmd_servers
+        exit 1
     elif [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
     fi
