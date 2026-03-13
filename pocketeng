@@ -177,20 +177,51 @@ cmd_init() {
     echo -e "${DIM}We'll create an EC2 in your account. You own everything.${NC}"
     echo ""
 
-    read -p "  AWS Access Key ID: " PE_AWS_KEY
-    read -sp "  AWS Secret Access Key: " PE_AWS_SECRET
-    echo ""
-    read -p "  Region [us-east-1]: " PE_AWS_REGION
-    PE_AWS_REGION="${PE_AWS_REGION:-us-east-1}"
-    echo ""
+    # Try to detect existing AWS credentials
+    local AWS_DETECTED=false
+    if aws sts get-caller-identity &>/dev/null 2>&1; then
+        local AWS_IDENTITY
+        AWS_IDENTITY=$(aws sts get-caller-identity --output json 2>/dev/null)
+        local AWS_ACCOUNT=$(echo "$AWS_IDENTITY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Account',''))" 2>/dev/null)
+        local AWS_ARN=$(echo "$AWS_IDENTITY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Arn',''))" 2>/dev/null)
+        PE_AWS_REGION="${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo 'us-east-1')}"
 
-    echo -n "  Validating... "
-    if ! AWS_ACCESS_KEY_ID="$PE_AWS_KEY" AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET" \
-         aws sts get-caller-identity --region "$PE_AWS_REGION" &>/dev/null; then
-        echo -e "${RED}Invalid credentials${NC}"
-        exit 1
+        echo -e "  ${GREEN}Found AWS credentials${NC}"
+        echo -e "  Account:  ${BOLD}$AWS_ACCOUNT${NC}"
+        echo -e "  Identity: ${DIM}$AWS_ARN${NC}"
+        echo -e "  Region:   ${BOLD}$PE_AWS_REGION${NC}"
+        echo ""
+        read -p "  Use these credentials? [Y/n] " USE_EXISTING
+        USE_EXISTING="${USE_EXISTING:-y}"
+
+        if [[ "$USE_EXISTING" =~ ^[Yy] ]]; then
+            AWS_DETECTED=true
+            # Inherit credentials from environment/config — no need to set explicit keys
+            PE_AWS_KEY=""
+            PE_AWS_SECRET=""
+            echo ""
+            read -p "  Region [$PE_AWS_REGION]: " input_region
+            PE_AWS_REGION="${input_region:-$PE_AWS_REGION}"
+        fi
     fi
-    echo -e "${GREEN}Valid${NC}"
+
+    if [ "$AWS_DETECTED" = false ]; then
+        echo ""
+        read -p "  AWS Access Key ID: " PE_AWS_KEY
+        read -sp "  AWS Secret Access Key: " PE_AWS_SECRET
+        echo ""
+        read -p "  Region [us-east-1]: " PE_AWS_REGION
+        PE_AWS_REGION="${PE_AWS_REGION:-us-east-1}"
+        echo ""
+
+        echo -n "  Validating... "
+        if ! AWS_ACCESS_KEY_ID="$PE_AWS_KEY" AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET" \
+             aws sts get-caller-identity --region "$PE_AWS_REGION" &>/dev/null; then
+            echo -e "${RED}Invalid credentials${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}Valid${NC}"
+    fi
     echo ""
 
     # Step 2: Anthropic key
@@ -238,8 +269,9 @@ cmd_init() {
     echo -e "${BOLD}Step 5: Launching${NC}"
     echo ""
 
-    export AWS_ACCESS_KEY_ID="$PE_AWS_KEY"
-    export AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET"
+    # Only set explicit credentials if they were manually entered
+    [ -n "$PE_AWS_KEY" ] && export AWS_ACCESS_KEY_ID="$PE_AWS_KEY"
+    [ -n "$PE_AWS_SECRET" ] && export AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET"
     export AWS_DEFAULT_REGION="$PE_AWS_REGION"
 
     local KEY_NAME="pe-$(openssl rand -hex 4)"
@@ -293,7 +325,7 @@ echo "=== Pocket Eng setup started ==="
 
 # Base packages
 echo "--- Installing base packages ---"
-dnf install -y nodejs20 npm git tmux python3 python3-pip jq tar gzip unzip which
+dnf install -y nodejs20 npm git tmux python3 python3-pip jq tar gzip unzip which rsync
 
 echo "--- Installing Claude Code ---"
 npm install -g @anthropic-ai/claude-code
@@ -367,14 +399,20 @@ CODEX_EOF
 
     # AWS CLI
     if [[ "$PE_AWSCLI" =~ ^[Yy] ]]; then
-        cat >> "$USERDATA_FILE" << AWSCLI_EOF
+        cat >> "$USERDATA_FILE" << 'AWSCLI_BASE_EOF'
 echo "--- Installing AWS CLI ---"
 curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
 unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip || echo "WARN: awscli install failed"
+AWSCLI_BASE_EOF
+        if [ -n "$PE_AWS_KEY" ]; then
+            cat >> "$USERDATA_FILE" << AWSCLI_KEYS_EOF
 echo 'export AWS_ACCESS_KEY_ID=$PE_AWS_KEY' >> /home/ec2-user/.bashrc
 echo 'export AWS_SECRET_ACCESS_KEY=$PE_AWS_SECRET' >> /home/ec2-user/.bashrc
+AWSCLI_KEYS_EOF
+        fi
+        cat >> "$USERDATA_FILE" << AWSCLI_REGION_EOF
 echo 'export AWS_DEFAULT_REGION=$PE_AWS_REGION' >> /home/ec2-user/.bashrc
-AWSCLI_EOF
+AWSCLI_REGION_EOF
     fi
 
     # Always: Anthropic key, project dir, git config, tmux, ready marker
@@ -685,11 +723,22 @@ Be specific and actionable. No fluff. Write as markdown. Do NOT include any tool
     echo ""
 
     # Step 3: Sync code to EC2
-    echo -n "  Syncing code to EC2... "
     local REMOTE_PROJECT="$WORK_DIR/$(basename "$PROJECT_DIR")"
+
+    # Ensure rsync is available on remote
+    echo -n "  Checking remote... "
+    if ! ssh_cmd "command -v rsync" &>/dev/null; then
+        echo -e "${YELLOW}installing rsync${NC}"
+        ssh_cmd "sudo dnf install -y rsync 2>/dev/null || sudo yum install -y rsync 2>/dev/null || sudo apt-get install -y rsync 2>/dev/null" &>/dev/null
+    else
+        echo -e "${GREEN}ok${NC}"
+    fi
+
+    echo -n "  Syncing code to EC2... "
     ssh_cmd "mkdir -p '$REMOTE_PROJECT'" 2>/dev/null
 
-    rsync -azq --delete \
+    local RSYNC_OUT
+    RSYNC_OUT=$(rsync -az \
         --exclude '.git' \
         --exclude 'node_modules' \
         --exclude '.build' \
@@ -698,9 +747,16 @@ Be specific and actionable. No fluff. Write as markdown. Do NOT include any tool
         --exclude '.DS_Store' \
         --exclude 'Pods' \
         --exclude 'build' \
+        --exclude '.claude' \
         -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-        "$PROJECT_DIR/" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/" 2>/dev/null
-    echo -e "${GREEN}done${NC}"
+        "$PROJECT_DIR/" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/" 2>&1)
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}done${NC}"
+    else
+        echo -e "${RED}failed${NC}"
+        echo -e "  ${DIM}$RSYNC_OUT${NC}"
+        return 1
+    fi
 
     # Step 4: Copy CLAUDE.md and handoff to EC2
     echo -n "  Syncing context files... "
