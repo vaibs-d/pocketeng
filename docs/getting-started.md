@@ -18,7 +18,7 @@ curl -fsSL https://pocketeng.co/install | sh
 ## Provision your server
 
 ```bash
-pocket-engineer init
+pocketeng init
 ```
 
 The wizard asks for three things:
@@ -34,7 +34,7 @@ When it's done, you'll see a QR code. That's for the phone app.
 ## Start coding
 
 ```bash
-pocket-engineer
+pocketeng
 ```
 
 This opens Claude Code inside a tmux session on your EC2. You can close your laptop — the session keeps running.
@@ -42,14 +42,14 @@ This opens Claude Code inside a tmux session on your EC2. You can close your lap
 To come back later:
 
 ```bash
-pocket-engineer attach
+pocketeng attach
 ```
 
 ## Connect your phone
 
 1. Open the **Pocket Eng** iOS app
 2. Tap **Add Server**
-3. Scan the QR code from your terminal (run `pocket-engineer qr` to show it again)
+3. Scan the QR code from your terminal (run `pocketeng qr` to show it again)
 
 That's it. Your phone is connected to the same EC2. You can start sessions, send prompts, and see Claude work — all from your phone.
 
@@ -58,7 +58,7 @@ That's it. Your phone is connected to the same EC2. You can start sessions, send
 Skip provisioning and connect to your existing server:
 
 ```bash
-pocket-engineer setup
+pocketeng setup
 ```
 
 Enter your host, SSH key path, and user. Pocket Eng doesn't install anything on your server — it just needs SSH access and Claude Code already installed.

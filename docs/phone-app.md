@@ -4,7 +4,7 @@ The Pocket Eng iOS app lets you run Claude Code sessions on your EC2 from your p
 
 ## Connect
 
-1. Run `pocket-engineer qr` in your terminal
+1. Run `pocketeng qr` in your terminal
 2. Open the Pocket Eng app
 3. Tap **Add Server** → scan the QR code
 
@@ -28,6 +28,6 @@ Claude Code runs on the EC2 via SSH. You see streaming output in real time — t
 
 ## Tips
 
-- **Handoff from laptop:** Run `pocket-engineer sync` on your laptop, then open the project on your phone. Claude reads `.handoff.md` and picks up where you left off.
+- **Handoff from laptop:** Run `pocketeng sync` on your laptop, then open the project on your phone. Claude reads `.handoff.md` and picks up where you left off.
 - **Multiple servers:** The app supports multiple server connections. Add as many as you need from the home screen.
 - **Status indicators:** Green dot = connected. Pulsing = Claude is actively working.

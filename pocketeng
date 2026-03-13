@@ -3,16 +3,17 @@
 # Sessions run in tmux on EC2, surviving disconnects.
 # Close your laptop, pick up on your phone, or reconnect later.
 #
-# Install:  brew install pocketengineer/tap/pocket-engineer
-# Start:    pocket-engineer init
+# Install:  curl -fsSL https://pocketeng.co/install | sh
+# Start:    pocketeng init
 # Docs:     https://github.com/vaibs-d/pocketengineer
 
 VERSION="1.2.0"
-CONFIG_DIR="$HOME/.pocket-engineer"
+CONFIG_DIR="$HOME/.pocketeng"
+LEGACY_DIR="$HOME/.pocket-engineer"
 CONFIG_FILE="$CONFIG_DIR/config"
 SERVERS_DIR="$CONFIG_DIR/servers"
 ACTIVE_FILE="$CONFIG_DIR/active"
-TMUX_SESSION="pocket-engineer"
+TMUX_SESSION="pocketeng"
 SERVER_OVERRIDE=""
 
 # Colors
@@ -26,8 +27,16 @@ NC='\033[0m'
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
+# Migrate old ~/.pocket-engineer dir to ~/.pocketeng
+migrate_dir() {
+    if [ -d "$LEGACY_DIR" ] && [ ! -d "$CONFIG_DIR" ]; then
+        mv "$LEGACY_DIR" "$CONFIG_DIR"
+    fi
+}
+
 # Migrate old single-server config to multi-server layout
 migrate_config() {
+    migrate_dir
     if [ -f "$CONFIG_FILE" ] && [ ! -d "$SERVERS_DIR" ]; then
         mkdir -p "$SERVERS_DIR"
         cp "$CONFIG_FILE" "$SERVERS_DIR/default.conf"
@@ -61,7 +70,7 @@ load_config() {
     fi
     EC2_HOST="${POCKET_ENGINEER_HOST:-${PE_HOST:-}}"
     EC2_USER="${POCKET_ENGINEER_USER:-${PE_USER:-ec2-user}}"
-    SSH_KEY="${POCKET_ENGINEER_KEY:-${PE_KEY:-$HOME/.ssh/pocket-engineer.pem}}"
+    SSH_KEY="${POCKET_ENGINEER_KEY:-${PE_KEY:-$HOME/.ssh/pocketeng.pem}}"
     WORK_DIR="${POCKET_ENGINEER_DIR:-${PE_DIR:-~/projects}}"
 }
 
@@ -90,7 +99,7 @@ EOF
 
 require_config() {
     if [ -z "$EC2_HOST" ]; then
-        echo -e "${RED}Not configured.${NC} Run ${BOLD}pocket-engineer init${NC} to provision, or ${BOLD}pocket-engineer setup${NC} to connect to an existing EC2."
+        echo -e "${RED}Not configured.${NC} Run ${BOLD}pocketeng init${NC} to provision, or ${BOLD}pocketeng setup${NC} to connect to an existing EC2."
         exit 1
     fi
 }
@@ -279,7 +288,7 @@ cmd_init() {
 
     cat > "$USERDATA_FILE" << 'BASE_EOF'
 #!/bin/bash
-exec > /var/log/pocket-engineer-setup.log 2>&1
+exec > /var/log/pocketeng-setup.log 2>&1
 echo "=== Pocket Eng setup started ==="
 
 # Base packages
@@ -395,7 +404,7 @@ command -v vercel &>/dev/null && echo "vercel: installed" || true
 command -v aws &>/dev/null && echo "aws: \$(aws --version 2>/dev/null)" || true
 
 echo "=== Setup complete ==="
-touch /home/ec2-user/.pocket-engineer-ready
+touch /home/ec2-user/.pocketeng-ready
 FINAL_EOF
 
     # Launch
@@ -431,7 +440,7 @@ FINAL_EOF
         sleep 5
         echo -n "."
         if ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes \
-           "ec2-user@$PUBLIC_IP" "test -f ~/.pocket-engineer-ready" &>/dev/null 2>&1; then
+           "ec2-user@$PUBLIC_IP" "test -f ~/.pocketeng-ready" &>/dev/null 2>&1; then
             break
         fi
     done
@@ -442,7 +451,7 @@ FINAL_EOF
     echo -e "  ${BOLD}Installed tools:${NC}"
     local INSTALL_LOG
     INSTALL_LOG=$(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-        "ec2-user@$PUBLIC_IP" "grep -E '^(node|npm|claude|git|python3|gh|docker|vercel|aws):' /var/log/pocket-engineer-setup.log 2>/dev/null" 2>/dev/null || true)
+        "ec2-user@$PUBLIC_IP" "grep -E '^(node|npm|claude|git|python3|gh|docker|vercel|aws):' /var/log/pocketeng-setup.log 2>/dev/null" 2>/dev/null || true)
     if [ -n "$INSTALL_LOG" ]; then
         while IFS= read -r line; do
             echo -e "    ${GREEN}✓${NC} $line"
@@ -465,7 +474,7 @@ FINAL_EOF
     echo -e "  SSH Key:   ${DIM}$KEY_FILE${NC}"
     echo -e "  Instance:  ${DIM}$INSTANCE_ID${NC}"
     echo ""
-    echo -e "  ${BOLD}Laptop:${NC}  pocket-engineer"
+    echo -e "  ${BOLD}Laptop:${NC}  pocketeng"
     echo -e "  ${BOLD}Phone:${NC}   Scan the QR code below in the Pocket Eng app"
     echo ""
 
@@ -512,7 +521,7 @@ cmd_setup() {
     read -p "  SSH user [ec2-user]: " input_user
     EC2_USER="${input_user:-ec2-user}"
 
-    local default_key="$HOME/.ssh/pocket-engineer.pem"
+    local default_key="$HOME/.ssh/pocketeng.pem"
     read -p "  SSH key path [$default_key]: " input_key
     SSH_KEY="${input_key:-$default_key}"
     [ ! -f "$SSH_KEY" ] && echo -e "  ${YELLOW}Warning: Key not found at $SSH_KEY${NC}"
@@ -525,7 +534,7 @@ cmd_setup() {
     echo -n "  Testing connection... "
     if ssh_cmd -o BatchMode=yes "echo ok" &>/dev/null; then
         echo -e "${GREEN}Connected!${NC}"
-        echo -e "  Run ${BOLD}pocket-engineer${NC} to start."
+        echo -e "  Run ${BOLD}pocketeng${NC} to start."
     else
         echo -e "${YELLOW}Could not connect${NC}"
     fi
@@ -537,7 +546,7 @@ cmd_interactive() {
     require_config
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Interactive mode"
     echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
-    echo -e "${DIM}Reattach: pocket-engineer --attach | Phone: open Pocket Eng app${NC}"
+    echo -e "${DIM}Reattach: pocketeng attach | Phone: open Pocket Eng app${NC}"
     echo ""
     ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude'"
 }
@@ -556,7 +565,7 @@ cmd_prompt() {
 cmd_resume() {
     require_config
     local sid="$1"
-    [ -z "$sid" ] && echo "Usage: pocket-engineer --resume <session-id>" && exit 1
+    [ -z "$sid" ] && echo "Usage: pocketeng resume <session-id>" && exit 1
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Resuming ${sid:0:8}..."
     ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude --resume \"$sid\"'"
 }
@@ -564,7 +573,7 @@ cmd_resume() {
 cmd_attach() {
     require_config
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Reattaching..."
-    ssh_cmd -t "tmux attach-session -t $TMUX_SESSION 2>/dev/null || echo 'No active session. Start one with: pocket-engineer'"
+    ssh_cmd -t "tmux attach-session -t $TMUX_SESSION 2>/dev/null || echo 'No active session. Start one with: pocketeng'"
 }
 
 cmd_list() {
@@ -584,7 +593,7 @@ cmd_list() {
         done | sort -k2 -r | head -10
     "
     echo ""
-    echo -e "${DIM}Resume: pocket-engineer --resume <id>${NC}"
+    echo -e "${DIM}Resume: pocketeng resume <id>${NC}"
 }
 
 cmd_status() {
@@ -613,7 +622,7 @@ cmd_logs() {
     require_config
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Setup Log"
     echo ""
-    ssh_cmd "cat /var/log/pocket-engineer-setup.log 2>/dev/null || echo 'Setup log not found'"
+    ssh_cmd "cat /var/log/pocketeng-setup.log 2>/dev/null || echo 'Setup log not found'"
 }
 
 cmd_qr() {
@@ -728,7 +737,7 @@ cmd_servers() {
     local current
     current=$(active_profile)
     if [ ! -d "$SERVERS_DIR" ] || [ -z "$(ls "$SERVERS_DIR"/*.conf 2>/dev/null)" ]; then
-        echo -e "  ${DIM}No servers configured. Run ${NC}${BOLD}pocket-engineer init${NC}${DIM} or ${NC}${BOLD}pocket-engineer setup${NC}"
+        echo -e "  ${DIM}No servers configured. Run ${NC}${BOLD}pocketeng init${NC}${DIM} or ${NC}${BOLD}pocketeng setup${NC}"
         echo ""
         return
     fi
@@ -745,14 +754,14 @@ cmd_servers() {
         fi
     done
     echo ""
-    echo -e "  ${DIM}Switch: pocket-engineer switch <name>${NC}"
+    echo -e "  ${DIM}Switch: pocketeng switch <name>${NC}"
     echo ""
 }
 
 cmd_switch() {
     local target="$1"
     if [ -z "$target" ]; then
-        echo "Usage: pocket-engineer switch <server-name>"
+        echo "Usage: pocketeng switch <server-name>"
         echo ""
         cmd_servers
         exit 1
@@ -769,7 +778,7 @@ cmd_switch() {
     source "$pfile"
     EC2_HOST="${PE_HOST:-}"
     EC2_USER="${PE_USER:-ec2-user}"
-    SSH_KEY="${PE_KEY:-$HOME/.ssh/pocket-engineer.pem}"
+    SSH_KEY="${PE_KEY:-$HOME/.ssh/pocketeng.pem}"
     WORK_DIR="${PE_DIR:-~/projects}"
     save_config "$target"
     echo -e "${GREEN}Switched to ${BOLD}$target${NC} ${DIM}($EC2_HOST)${NC}"
@@ -787,28 +796,28 @@ cmd_help() {
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} v$VERSION — Claude Code on your cloud, from anywhere."
     echo ""
     echo "Getting started:"
-    echo "  pocket-engineer init                 Provision a new EC2 dev environment"
-    echo "  pocket-engineer setup                Connect to an existing EC2"
+    echo "  pocketeng init                 Provision a new EC2 dev environment"
+    echo "  pocketeng setup                Connect to an existing EC2"
     echo ""
     echo "Daily use:"
-    echo "  pocket-engineer                      Interactive Claude Code session"
-    echo "  pocket-engineer \"prompt\"              One-shot prompt"
-    echo "  pocket-engineer attach                Reattach to running session"
-    echo "  pocket-engineer resume <id>           Resume a past session"
-    echo "  pocket-engineer list                  List sessions"
-    echo "  pocket-engineer status                Check if Claude is running"
-    echo "  pocket-engineer qr                    Show QR code for phone app"
-    echo "  pocket-engineer logs                  Show EC2 setup/install log"
-    echo "  pocket-engineer sync [path]           Sync project + session to EC2"
+    echo "  pocketeng                      Interactive Claude Code session"
+    echo "  pocketeng \"prompt\"              One-shot prompt"
+    echo "  pocketeng attach                Reattach to running session"
+    echo "  pocketeng resume <id>           Resume a past session"
+    echo "  pocketeng list                  List sessions"
+    echo "  pocketeng status                Check if Claude is running"
+    echo "  pocketeng qr                    Show QR code for phone app"
+    echo "  pocketeng logs                  Show EC2 setup/install log"
+    echo "  pocketeng sync [path]           Sync project + session to EC2"
     echo ""
     echo "Multi-server:"
-    echo "  pocket-engineer servers               List all configured servers"
-    echo "  pocket-engineer switch <name>          Switch active server"
-    echo "  pocket-engineer setup --name <name>    Add a named server"
-    echo "  pocket-engineer sync --server <name>   Sync to a specific server"
+    echo "  pocketeng servers               List all configured servers"
+    echo "  pocketeng switch <name>          Switch active server"
+    echo "  pocketeng setup --name <name>    Add a named server"
+    echo "  pocketeng sync --server <name>   Sync to a specific server"
     echo ""
     echo "How it works:"
-    echo "  1. Run 'pocket-engineer init' on your laptop"
+    echo "  1. Run 'pocketeng init' on your laptop"
     echo "  2. Scan the QR code with the Pocket Eng app"
     echo "  3. Code from laptop or phone — sessions survive disconnects"
 }
@@ -841,7 +850,7 @@ case "${1:-}" in
     qr|--qr)             cmd_qr ;;
     logs|--logs)         cmd_logs ;;
     help|--help|-h)      cmd_help ;;
-    version|--version|-v) echo "pocket-engineer v$VERSION" ;;
+    version|--version|-v) echo "pocketeng v$VERSION" ;;
     "")             cmd_interactive ;;
     -*)             echo "Unknown option: $1"; cmd_help; exit 1 ;;
     *)              cmd_prompt "$1" ;;

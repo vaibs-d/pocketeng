@@ -1,4 +1,4 @@
-class PocketEngineer < Formula
+class Pocketeng < Formula
   desc "Claude Code on your cloud, from anywhere"
   homepage "https://github.com/vaibs-d/pocketengineer"
   url "https://github.com/vaibs-d/pocketengineer/archive/refs/heads/main.tar.gz"
@@ -6,10 +6,10 @@ class PocketEngineer < Formula
   license "MIT"
 
   def install
-    bin.install "pocket-engineer"
+    bin.install "pocketeng"
   end
 
   test do
-    assert_match "pocket-engineer", shell_output("#{bin}/pocket-engineer --version")
+    assert_match "pocketeng", shell_output("#{bin}/pocketeng --version")
   end
 end

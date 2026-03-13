@@ -16,7 +16,7 @@ Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "pocket-engineer": {
+    "pocketeng": {
       "command": "node",
       "args": ["/path/to/mcp-server/index.js"]
     }

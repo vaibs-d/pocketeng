@@ -5,7 +5,7 @@ No magic. Just SSH, tmux, and Claude Code.
 ## The setup
 
 ```
-pocket-engineer init
+pocketeng init
 ```
 
 This provisions a `t3.medium` EC2 in your AWS account and installs:
@@ -27,10 +27,10 @@ You get an SSH key and a security group. That's the entire infrastructure.
 └────────────┘                   └────────────────┘
 ```
 
-When you run `pocket-engineer`, it:
+When you run `pocketeng`, it:
 
 1. Opens an SSH connection to your EC2
-2. Creates a **tmux** session named `pocket-engineer`
+2. Creates a **tmux** session named `pocketeng`
 3. Runs `claude` (Claude Code) inside that tmux session
 
 That's it. You're now talking to Claude Code on the server.
@@ -41,7 +41,7 @@ tmux is a terminal multiplexer — it keeps processes running even when you disc
 
 - Close your laptop lid → tmux keeps Claude running
 - Wi-Fi drops → tmux keeps Claude running
-- Reattach anytime with `pocket-engineer attach`
+- Reattach anytime with `pocketeng attach`
 
 This is the same thing that happens when you run a long build in a tmux session on a server. Nothing new.
 
@@ -70,12 +70,12 @@ The app parses the streaming JSON output in real time — that's how you see tex
 └────────────┘                   └────────────────┘
 ```
 
-`pocket-engineer sync` rsyncs your local project to EC2 over SSH. It also generates a `.handoff.md` — a summary of your current Claude session so the phone session knows where you left off.
+`pocketeng sync` rsyncs your local project to EC2 over SSH. It also generates a `.handoff.md` — a summary of your current Claude session so the phone session knows where you left off.
 
 ## What you own
 
 - **The EC2** — it's in your AWS account, your region, your VPC
-- **The SSH key** — stored locally at `~/.pocket-engineer/`
+- **The SSH key** — stored locally at `~/.pocketeng/`
 - **The code** — lives on your EC2, synced by you
 - **The sessions** — Claude Code session files at `~/.claude/` on your EC2
 

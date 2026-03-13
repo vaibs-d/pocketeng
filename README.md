@@ -1,6 +1,6 @@
 <p align="center">
   <br />
-  <code>&nbsp;pocket-engineer&nbsp;</code>
+  <code>&nbsp;pocketeng&nbsp;</code>
   <br />
   <br />
   <strong>Claude Code on your cloud, from anywhere.</strong>
@@ -50,13 +50,13 @@ curl -fsSL https://pocketeng.co/install | sh
 
 **Homebrew:**
 ```bash
-brew install vaibs-d/pocketengineer/pocket-engineer
+brew install vaibs-d/pocketengineer/pocketeng
 ```
 
 **Manual:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vaibs-d/pocketengineer/main/pocket-engineer \
-  -o /usr/local/bin/pocket-engineer && chmod +x /usr/local/bin/pocket-engineer
+curl -fsSL https://raw.githubusercontent.com/vaibs-d/pocketengineer/main/pocketeng \
+  -o /usr/local/bin/pocketeng && chmod +x /usr/local/bin/pocketeng
 ```
 
 </details>
@@ -64,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/vaibs-d/pocketengineer/main/pocket-
 ## Quick Start
 
 ```bash
-pocket-engineer init
+pocketeng init
 ```
 
 That's it. The wizard walks you through everything:
@@ -78,7 +78,7 @@ At the end you get a QR code. Scan it with the **Pocket Eng** iOS app to steer C
 
 ```bash
 # Start coding
-pocket-engineer
+pocketeng
 ```
 
 ## Commands
@@ -87,50 +87,50 @@ pocket-engineer
 
 | Command | What it does |
 |---|---|
-| `pocket-engineer` | Interactive Claude Code session |
-| `pocket-engineer "build a REST API"` | One-shot prompt |
-| `pocket-engineer sync` | Push your local project to EC2 (with handoff notes for the phone session) |
-| `pocket-engineer attach` | Reattach after a disconnect |
-| `pocket-engineer resume <id>` | Resume a previous session |
-| `pocket-engineer list` | List recent sessions |
-| `pocket-engineer status` | Check if Claude is running |
-| `pocket-engineer qr` | Show QR code for the phone app |
+| `pocketeng` | Interactive Claude Code session |
+| `pocketeng "build a REST API"` | One-shot prompt |
+| `pocketeng sync` | Push your local project to EC2 (with handoff notes for the phone session) |
+| `pocketeng attach` | Reattach after a disconnect |
+| `pocketeng resume <id>` | Resume a previous session |
+| `pocketeng list` | List recent sessions |
+| `pocketeng status` | Check if Claude is running |
+| `pocketeng qr` | Show QR code for the phone app |
 
 ### Multi-server
 
 Manage multiple EC2 instances — sync project A to `work`, project B to `personal`.
 
 ```bash
-pocket-engineer servers                  # List all servers
-pocket-engineer setup --name work        # Add a new server
-pocket-engineer switch work              # Switch active server
-pocket-engineer sync --server personal   # Sync to a specific server
+pocketeng servers                  # List all servers
+pocketeng setup --name work        # Add a new server
+pocketeng switch work              # Switch active server
+pocketeng sync --server personal   # Sync to a specific server
 ```
 
 The `--server <name>` flag works with any command.
 
 ## How It Works
 
-1. `pocket-engineer init` provisions an EC2 with Claude Code, Node, Python, Git, tmux, and your tools
+1. `pocketeng init` provisions an EC2 with Claude Code, Node, Python, Git, tmux, and your tools
 2. The CLI opens an SSH tunnel and runs Claude Code inside a **tmux** session
 3. tmux keeps the process alive — even when you close the terminal or lose Wi-Fi
-4. `pocket-engineer sync` pushes your local project + a handoff document to EC2
+4. `pocketeng sync` pushes your local project + a handoff document to EC2
 5. Open the **Pocket Eng** iOS app, scan QR, and continue on your phone
 
 Sessions are just SSH connections to tmux. Nothing magical, nothing proprietary.
 
 ## Configuration
 
-Set these if you're connecting to an existing server (or use `pocket-engineer setup`):
+Set these if you're connecting to an existing server (or use `pocketeng setup`):
 
 | Variable | Description | Default |
 |---|---|---|
-| `POCKET_ENGINEER_HOST` | EC2 IP or hostname | *(required)* |
-| `POCKET_ENGINEER_USER` | SSH user | `ec2-user` |
-| `POCKET_ENGINEER_KEY` | Path to SSH private key | `~/.ssh/pocket-engineer.pem` |
-| `POCKET_ENGINEER_DIR` | Remote working directory | `~/projects` |
+| `PE_HOST` | EC2 IP or hostname | *(required)* |
+| `PE_USER` | SSH user | `ec2-user` |
+| `PE_KEY` | Path to SSH private key | `~/.ssh/pocketeng.pem` |
+| `PE_DIR` | Remote working directory | `~/projects` |
 
-Config is stored in `~/.pocket-engineer/servers/<name>.conf`.
+Config is stored in `~/.pocketeng/servers/<name>.conf`.
 
 ## MCP Server
 
@@ -145,7 +145,7 @@ Add to your Claude Code MCP config:
 ```json
 {
   "mcpServers": {
-    "pocket-engineer": {
+    "pocketeng": {
       "command": "node",
       "args": ["/path/to/mcp-server/index.js"]
     }

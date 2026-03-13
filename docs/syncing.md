@@ -6,7 +6,7 @@ Push a local project to your EC2 so you can work on it from your phone.
 
 ```bash
 cd ~/my-project
-pocket-engineer sync
+pocketeng sync
 ```
 
 This does three things:
@@ -20,13 +20,13 @@ When you open the project on your phone and start a new session, Claude reads th
 ## Sync a specific directory
 
 ```bash
-pocket-engineer sync /path/to/project
+pocketeng sync /path/to/project
 ```
 
 ## Sync to a specific server
 
 ```bash
-pocket-engineer sync --server work
+pocketeng sync --server work
 ```
 
 ## What gets synced
@@ -40,7 +40,7 @@ Everything except:
 
 ## What's a handoff?
 
-When you run `pocket-engineer sync`, it asks your local Claude Code session to write a short document covering:
+When you run `pocketeng sync`, it asks your local Claude Code session to write a short document covering:
 
 - What's been built so far
 - Key decisions made

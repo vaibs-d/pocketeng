@@ -4,7 +4,7 @@
 set -e
 
 REPO="vaibs-d/pocketengineer"
-BINARY="pocket-engineer"
+BINARY="pocketeng"
 INSTALL_DIR="/usr/local/bin"
 
 # Colors
@@ -63,7 +63,7 @@ if command -v $BINARY &>/dev/null; then
     VERSION=$($BINARY version 2>/dev/null || $BINARY --version 2>/dev/null || echo "installed")
     echo -e "  ${GREEN}${BOLD}$VERSION${NC}"
     echo ""
-    echo -e "  Get started:  ${BOLD}pocket-engineer init${NC}"
+    echo -e "  Get started:  ${BOLD}pocketeng init${NC}"
     echo ""
 else
     echo -e "  ${GREEN}Installed!${NC} You may need to restart your shell or add $INSTALL_DIR to PATH."

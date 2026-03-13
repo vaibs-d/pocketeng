@@ -7,19 +7,28 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { execSync, spawn } from "child_process";
-import { readFileSync, existsSync, readdirSync, copyFileSync, mkdirSync, writeFileSync } from "fs";
+import { readFileSync, existsSync, readdirSync, copyFileSync, mkdirSync, writeFileSync, renameSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const CONFIG_DIR = join(homedir(), ".pocket-engineer");
+const CONFIG_DIR = join(homedir(), ".pocketeng");
+const LEGACY_DIR = join(homedir(), ".pocket-engineer");
 const SERVERS_DIR = join(CONFIG_DIR, "servers");
 const ACTIVE_FILE = join(CONFIG_DIR, "active");
 const LEGACY_CONFIG = join(CONFIG_DIR, "config");
 
+/** Migrate old ~/.pocket-engineer dir to ~/.pocketeng */
+function migrateDir() {
+  if (existsSync(LEGACY_DIR) && !existsSync(CONFIG_DIR)) {
+    renameSync(LEGACY_DIR, CONFIG_DIR);
+  }
+}
+
 /** Migrate old single-server config to multi-server layout */
 function migrateConfig() {
+  try { migrateDir(); } catch {}
   if (existsSync(LEGACY_CONFIG) && !existsSync(SERVERS_DIR)) {
     mkdirSync(SERVERS_DIR, { recursive: true });
     copyFileSync(LEGACY_CONFIG, join(SERVERS_DIR, "default.conf"));
@@ -158,7 +167,7 @@ function runLocal(command, timeoutMs = 120000) {
 // ─── MCP Server ──────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "pocket-engineer", version: "1.2.0" },
+  { name: "pocketeng", version: "1.2.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -255,7 +264,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (!config || !config.host) {
     const profileMsg = args?.server
       ? `Server profile '${args.server}' not found or not configured.`
-      : "Pocket Eng not configured. Run `pocket-engineer init` or `pocket-engineer setup` first.";
+      : "Pocket Eng not configured. Run `pocketeng init` or `pocketeng setup` first.";
     return {
       content: [{ type: "text", text: profileMsg }],
       isError: true,
@@ -295,7 +304,7 @@ function handleServers() {
       content: [
         {
           type: "text",
-          text: "No servers configured. Run `pocket-engineer init` or `pocket-engineer setup` first.",
+          text: "No servers configured. Run `pocketeng init` or `pocketeng setup` first.",
         },
       ],
     };
@@ -427,7 +436,7 @@ async function handleStatus(config) {
   // Check tmux (CLI sessions)
   const tmuxResult = await runSSH(
     config,
-    "tmux has-session -t pocket-engineer 2>/dev/null && echo RUNNING || echo STOPPED"
+    "tmux has-session -t pocketeng 2>/dev/null && echo RUNNING || echo STOPPED"
   );
   if (tmuxResult.stdout === "RUNNING") {
     lines.push("CLI session: RUNNING (tmux)");

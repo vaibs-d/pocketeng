@@ -5,20 +5,20 @@ Run different projects on different EC2 instances. Your work stuff on one server
 ## Add a server
 
 ```bash
-pocket-engineer setup --name work
+pocketeng setup --name work
 ```
 
 Or when provisioning a new one:
 
 ```bash
-pocket-engineer init
+pocketeng init
 # Step 4 asks for a server name
 ```
 
 ## See your servers
 
 ```bash
-pocket-engineer servers
+pocketeng servers
 ```
 
 ```
@@ -31,7 +31,7 @@ The `●` shows which server all commands currently target.
 ## Switch servers
 
 ```bash
-pocket-engineer switch work
+pocketeng switch work
 ```
 
 Now every command — `status`, `sync`, `qr`, etc. — goes to the `work` server until you switch again.
@@ -41,20 +41,20 @@ Now every command — `status`, `sync`, `qr`, etc. — goes to the `work` server
 Use `--server` on any command to target a specific server without switching:
 
 ```bash
-pocket-engineer sync --server work
-pocket-engineer status --server default
+pocketeng sync --server work
+pocketeng status --server default
 ```
 
 ## How it's stored
 
-Config lives in `~/.pocket-engineer/servers/`:
+Config lives in `~/.pocketeng/servers/`:
 
 ```
-~/.pocket-engineer/
+~/.pocketeng/
   active              # name of the current server
   servers/
     default.conf      # host, user, key, dir
     work.conf
 ```
 
-If you're upgrading from an older version, your existing config is automatically migrated to `servers/default.conf`.
+If you're upgrading from an older version, your existing config is automatically migrated.
