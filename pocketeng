@@ -72,6 +72,7 @@ load_config() {
     EC2_USER="${POCKET_ENGINEER_USER:-${PE_USER:-ec2-user}}"
     SSH_KEY="${POCKET_ENGINEER_KEY:-${PE_KEY:-$HOME/.ssh/pocketeng.pem}}"
     WORK_DIR="${POCKET_ENGINEER_DIR:-${PE_DIR:-~/projects}}"
+    EC2_INSTANCE_ID="${PE_INSTANCE_ID:-}"
 }
 
 save_config() {
@@ -83,6 +84,7 @@ PE_HOST="$EC2_HOST"
 PE_USER="$EC2_USER"
 PE_KEY="$SSH_KEY"
 PE_DIR="$WORK_DIR"
+PE_INSTANCE_ID="$EC2_INSTANCE_ID"
 EOF
     chmod 600 "$SERVERS_DIR/${profile}.conf"
     # Write legacy config for backward compat (always reflects active)
@@ -92,6 +94,7 @@ PE_HOST="$EC2_HOST"
 PE_USER="$EC2_USER"
 PE_KEY="$SSH_KEY"
 PE_DIR="$WORK_DIR"
+PE_INSTANCE_ID="$EC2_INSTANCE_ID"
 EOF
     chmod 600 "$CONFIG_FILE"
     echo "$profile" > "$ACTIVE_FILE"
@@ -99,7 +102,7 @@ EOF
 
 require_config() {
     if [ -z "$EC2_HOST" ]; then
-        echo -e "${RED}Not configured.${NC} Run ${BOLD}pocketeng init${NC} to provision, or ${BOLD}pocketeng setup${NC} to connect to an existing EC2."
+        echo -e "${RED}Not configured.${NC} Run ${BOLD}pocketeng init${NC} to get started."
         exit 1
     fi
 }
@@ -161,115 +164,14 @@ except ImportError:
 " "$data" 2>/dev/null
 }
 
-# ─── Init: Provision new EC2 ────────────────────────────────────────────────
+# ─── Init: EC2 provisioning (shared by pairing + manual wizard) ──────────────
 
-cmd_init() {
-    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Initialize your cloud dev environment"
-    echo ""
-
+_do_provision() {
     if ! command -v aws &>/dev/null; then
         echo -e "${RED}AWS CLI required.${NC} Install: brew install awscli"
         exit 1
     fi
 
-    # Step 1: AWS credentials
-    echo -e "${BOLD}Step 1: AWS Credentials${NC}"
-    echo -e "${DIM}We'll create an EC2 in your account. You own everything.${NC}"
-    echo ""
-
-    # Try to detect existing AWS credentials
-    local AWS_DETECTED=false
-    if aws sts get-caller-identity &>/dev/null 2>&1; then
-        local AWS_IDENTITY
-        AWS_IDENTITY=$(aws sts get-caller-identity --output json 2>/dev/null)
-        local AWS_ACCOUNT=$(echo "$AWS_IDENTITY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Account',''))" 2>/dev/null)
-        local AWS_ARN=$(echo "$AWS_IDENTITY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Arn',''))" 2>/dev/null)
-        PE_AWS_REGION="${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo 'us-east-1')}"
-
-        echo -e "  ${GREEN}Found AWS credentials${NC}"
-        echo -e "  Account:  ${BOLD}$AWS_ACCOUNT${NC}"
-        echo -e "  Identity: ${DIM}$AWS_ARN${NC}"
-        echo -e "  Region:   ${BOLD}$PE_AWS_REGION${NC}"
-        echo ""
-        read -p "  Use these credentials? [Y/n] " USE_EXISTING
-        USE_EXISTING="${USE_EXISTING:-y}"
-
-        if [[ "$USE_EXISTING" =~ ^[Yy] ]]; then
-            AWS_DETECTED=true
-            # Inherit credentials from environment/config — no need to set explicit keys
-            PE_AWS_KEY=""
-            PE_AWS_SECRET=""
-            echo ""
-            read -p "  Region [$PE_AWS_REGION]: " input_region
-            PE_AWS_REGION="${input_region:-$PE_AWS_REGION}"
-        fi
-    fi
-
-    if [ "$AWS_DETECTED" = false ]; then
-        echo ""
-        read -p "  AWS Access Key ID: " PE_AWS_KEY
-        read -sp "  AWS Secret Access Key: " PE_AWS_SECRET
-        echo ""
-        read -p "  Region [us-east-1]: " PE_AWS_REGION
-        PE_AWS_REGION="${PE_AWS_REGION:-us-east-1}"
-        echo ""
-
-        echo -n "  Validating... "
-        if ! AWS_ACCESS_KEY_ID="$PE_AWS_KEY" AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET" \
-             aws sts get-caller-identity --region "$PE_AWS_REGION" &>/dev/null; then
-            echo -e "${RED}Invalid credentials${NC}"
-            exit 1
-        fi
-        echo -e "${GREEN}Valid${NC}"
-    fi
-    echo ""
-
-    # Step 2: Anthropic key
-    echo -e "${BOLD}Step 2: Anthropic API Key${NC}"
-    echo -e "${DIM}Powers Claude Code. Get one at console.anthropic.com${NC}"
-    echo ""
-    read -sp "  API Key (sk-ant-...): " PE_ANTHROPIC_KEY
-    echo ""
-    echo ""
-
-    # Step 3: Tools
-    echo -e "${BOLD}Step 3: Your Toolchain${NC}"
-    echo -e "${DIM}Claude Code, Node.js, Python, Git, tmux are always installed.${NC}"
-    echo ""
-
-    PE_GITHUB="n"; PE_GITHUB_TOKEN=""
-    PE_VERCEL="n"; PE_VERCEL_TOKEN=""
-    PE_SUPABASE="n"; PE_SUPABASE_TOKEN=""
-    PE_DOCKER="n"
-    PE_CODEX="n"; PE_OPENAI_KEY=""
-    PE_AWSCLI="y"
-
-    read -p "  GitHub CLI?   [y/N] " PE_GITHUB; PE_GITHUB="${PE_GITHUB:-n}"
-    [[ "$PE_GITHUB" =~ ^[Yy] ]] && read -p "    Token (optional, Enter to skip): " PE_GITHUB_TOKEN
-
-    read -p "  Vercel?       [y/N] " PE_VERCEL; PE_VERCEL="${PE_VERCEL:-n}"
-    [[ "$PE_VERCEL" =~ ^[Yy] ]] && read -p "    Token (optional): " PE_VERCEL_TOKEN
-
-    read -p "  Supabase?     [y/N] " PE_SUPABASE; PE_SUPABASE="${PE_SUPABASE:-n}"
-    [[ "$PE_SUPABASE" =~ ^[Yy] ]] && read -p "    Token (optional): " PE_SUPABASE_TOKEN
-
-    read -p "  Docker?       [y/N] " PE_DOCKER; PE_DOCKER="${PE_DOCKER:-n}"
-
-    read -p "  OpenAI Codex? [y/N] " PE_CODEX; PE_CODEX="${PE_CODEX:-n}"
-    [[ "$PE_CODEX" =~ ^[Yy] ]] && read -p "    API key (optional): " PE_OPENAI_KEY
-
-    read -p "  AWS CLI?      [Y/n] " PE_AWSCLI; PE_AWSCLI="${PE_AWSCLI:-y}"
-
-    echo ""
-    echo -e "${BOLD}Step 4: Server Name${NC}"
-    read -p "  Name this server [default]: " PE_SERVER_NAME
-    PE_SERVER_NAME="${PE_SERVER_NAME:-default}"
-    echo ""
-
-    echo -e "${BOLD}Step 5: Launching${NC}"
-    echo ""
-
-    # Only set explicit credentials if they were manually entered
     [ -n "$PE_AWS_KEY" ] && export AWS_ACCESS_KEY_ID="$PE_AWS_KEY"
     [ -n "$PE_AWS_SECRET" ] && export AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET"
     export AWS_DEFAULT_REGION="$PE_AWS_REGION"
@@ -503,6 +405,7 @@ FINAL_EOF
     EC2_USER="ec2-user"
     SSH_KEY="$KEY_FILE"
     WORK_DIR="~/projects"
+    EC2_INSTANCE_ID="$INSTANCE_ID"
     save_config "$PE_SERVER_NAME"
 
     echo ""
@@ -527,6 +430,367 @@ FINAL_EOF
     echo ""
     echo -e "  ${DIM}Or enter manually in app — Host: $PUBLIC_IP${NC}"
     echo ""
+}
+
+# ─── Init: Provision new EC2 (phone pairing — default) ──────────────────────
+
+# Detect which credentials are already present on this Mac
+_detect_local_creds() {
+    # Anthropic key
+    PE_ANTHROPIC_KEY="${ANTHROPIC_API_KEY:-}"
+    if [ -z "$PE_ANTHROPIC_KEY" ]; then
+        PE_ANTHROPIC_KEY=$(python3 -c "
+import os, json
+# Claude Code stores it in ~/.claude.json
+p = os.path.expanduser('~/.claude.json')
+if os.path.exists(p):
+    d = json.load(open(p))
+    print(d.get('primaryApiKey', d.get('apiKey', '')))
+" 2>/dev/null)
+    fi
+
+    # AWS credentials
+    PE_AWS_KEY="${AWS_ACCESS_KEY_ID:-}"
+    PE_AWS_SECRET="${AWS_SECRET_ACCESS_KEY:-}"
+    PE_AWS_REGION="${AWS_DEFAULT_REGION:-}"
+    if [ -z "$PE_AWS_KEY" ]; then
+        PE_AWS_KEY=$(python3 -c "
+import configparser, os
+p = os.path.expanduser('~/.aws/credentials')
+if os.path.exists(p):
+    c = configparser.ConfigParser()
+    c.read(p)
+    print(c.get('default', 'aws_access_key_id', fallback=''))
+" 2>/dev/null)
+        PE_AWS_SECRET=$(python3 -c "
+import configparser, os
+p = os.path.expanduser('~/.aws/credentials')
+if os.path.exists(p):
+    c = configparser.ConfigParser()
+    c.read(p)
+    print(c.get('default', 'aws_secret_access_key', fallback=''))
+" 2>/dev/null)
+    fi
+    if [ -z "$PE_AWS_REGION" ]; then
+        PE_AWS_REGION=$(python3 -c "
+import configparser, os
+p = os.path.expanduser('~/.aws/config')
+if os.path.exists(p):
+    c = configparser.ConfigParser()
+    c.read(p)
+    print(c.get('default', 'region', fallback=''))
+" 2>/dev/null)
+    fi
+    PE_AWS_REGION="${PE_AWS_REGION:-us-east-1}"
+}
+
+cmd_init() {
+    # --manual flag: fall back to the original wizard
+    for arg in "$@"; do
+        [[ "$arg" == "--manual" ]] && { _cmd_init_wizard; return; }
+    done
+
+    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Setup"
+    echo ""
+
+    # Check what's already on this Mac
+    _detect_local_creds
+
+    # Build list of what the phone needs to provide
+    local NEEDS=""
+    [ -z "$PE_ANTHROPIC_KEY" ] && NEEDS="${NEEDS:+$NEEDS,}anthropic_key"
+    [ -z "$PE_AWS_KEY" ]       && NEEDS="${NEEDS:+$NEEDS,}aws_key,aws_secret"
+
+    if [ -z "$NEEDS" ]; then
+        echo -e "  ${GREEN}Found credentials on this Mac.${NC} Open the ${BOLD}Pocket Eng${NC} app and scan to confirm."
+    else
+        echo -e "  Open the ${BOLD}Pocket Eng${NC} app and scan — it will ask for: ${BOLD}${NEEDS/,/, }${NC}"
+    fi
+    echo ""
+
+    # Find local LAN IP
+    local LOCAL_IP
+    LOCAL_IP=$(python3 -c "
+import socket
+try:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(('8.8.8.8', 80))
+    print(s.getsockname()[0])
+    s.close()
+except Exception:
+    print('127.0.0.1')
+" 2>/dev/null)
+
+    local PORT=$((8700 + RANDOM % 300))
+    local TOKEN
+    TOKEN=$(openssl rand -hex 16)
+    local RESULT_FILE
+    RESULT_FILE=$(mktemp)
+    local PYFILE
+    PYFILE=$(mktemp /tmp/pe-pair-XXXX.py)
+
+    cat > "$PYFILE" << 'PYEOF'
+import http.server, json, sys, threading, socket, time
+
+token, result_file, port, local_ip, needs = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+
+# UDP broadcast so phone auto-discovers Mac on same WiFi
+DISCOVERY_PORT = 8698
+discovery_payload = json.dumps({
+    "type": "pe-pair",
+    "ip": local_ip,
+    "port": port,
+    "token": token,
+    "needs": needs,
+}).encode()
+
+def broadcast_loop():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        while True:
+            try:
+                sock.sendto(discovery_payload, ('<broadcast>', DISCOVERY_PORT))
+            except Exception:
+                pass
+            time.sleep(2)
+    finally:
+        sock.close()
+
+threading.Thread(target=broadcast_loop, daemon=True).start()
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path == '/pair':
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                data = json.loads(self.rfile.read(length))
+                if data.get('token') == token:
+                    with open(result_file, 'w') as f:
+                        json.dump(data, f)
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'ok')
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
+            except Exception:
+                pass
+        self.send_response(400)
+        self.end_headers()
+
+    def log_message(self, *a): pass
+
+http.server.HTTPServer(('0.0.0.0', port), Handler).serve_forever()
+PYEOF
+
+    python3 "$PYFILE" "$TOKEN" "$RESULT_FILE" "$PORT" "$LOCAL_IP" "$NEEDS" &
+    local LISTENER_PID=$!
+
+    # Same-network hint (phone auto-discovers via UDP broadcast on port 8698)
+    echo -e "  ${GREEN}On the same WiFi?${NC} Open ${BOLD}Pocket Eng${NC} — it will find your Mac automatically."
+    echo -e "  ${DIM}Different network? Scan below.${NC}"
+    echo ""
+    # Encode what the phone needs to collect in the QR
+    generate_qr "pe-pair://$LOCAL_IP:$PORT?token=$TOKEN&needs=$NEEDS"
+    echo ""
+    echo -e "  ${DIM}Waiting for Pocket Eng app...  Ctrl+C to cancel${NC}"
+    echo ""
+
+    # Wait up to 5 minutes for phone to connect
+    local WAITED=0
+    while [ ! -s "$RESULT_FILE" ] && [ $WAITED -lt 300 ]; do
+        sleep 1
+        WAITED=$((WAITED + 1))
+    done
+    kill $LISTENER_PID 2>/dev/null
+    rm -f "$PYFILE"
+
+    if [ ! -s "$RESULT_FILE" ]; then
+        rm -f "$RESULT_FILE"
+        echo -e "${RED}Timed out.${NC} Run ${BOLD}pocketeng init --manual${NC} to set up without the app."
+        exit 1
+    fi
+
+    echo -e "  ${GREEN}Phone connected!${NC}"
+    echo ""
+
+    # Read action from phone: "provision" (new EC2) or "connect" (existing server)
+    local _action
+    _action=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('action','provision'))" "$RESULT_FILE")
+    PE_SERVER_NAME=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('server_name','default'))" "$RESULT_FILE")
+
+    if [ "$_action" = "connect" ]; then
+        # Phone is restoring an existing server to this Mac (e.g. new laptop, lost config)
+        local _host _user _key_b64 _dir _key_file
+        _host=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('host',''))" "$RESULT_FILE")
+        _user=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('user','ec2-user'))" "$RESULT_FILE")
+        _key_b64=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('ssh_key',''))" "$RESULT_FILE")
+        _dir=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('dir','~/projects'))" "$RESULT_FILE")
+        rm -f "$RESULT_FILE"
+
+        if [ -z "$_host" ] || [ -z "$_key_b64" ]; then
+            echo -e "${RED}Incomplete server info from app.${NC}"
+            exit 1
+        fi
+
+        mkdir -p "$CONFIG_DIR"
+        _key_file="$CONFIG_DIR/pe-restored-${PE_SERVER_NAME}.pem"
+        echo "$_key_b64" | base64 -d > "$_key_file"
+        chmod 600 "$_key_file"
+
+        EC2_HOST="$_host"
+        EC2_USER="$_user"
+        SSH_KEY="$_key_file"
+        WORK_DIR="$_dir"
+        save_config "$PE_SERVER_NAME"
+
+        echo -e "  Restored ${BOLD}$PE_SERVER_NAME${NC} → ${BOLD}$_host${NC}"
+        echo ""
+        echo -n "  Testing connection... "
+        if ssh_cmd -o BatchMode=yes "echo ok" &>/dev/null; then
+            echo -e "${GREEN}Connected!${NC}"
+            echo ""
+            echo -e "  Run ${BOLD}pocketeng${NC} to start."
+        else
+            echo -e "${YELLOW}Could not connect${NC} — server may be stopped."
+        fi
+    else
+        # Provision a new EC2
+        # Phone fills in only what was missing locally; use local creds for the rest
+        echo -e "  Spinning up your EC2..."
+        echo ""
+        [ -z "$PE_ANTHROPIC_KEY" ] && PE_ANTHROPIC_KEY=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('anthropic_key',''))" "$RESULT_FILE")
+        [ -z "$PE_AWS_KEY" ]       && PE_AWS_KEY=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('aws_key',''))" "$RESULT_FILE")
+        [ -z "$PE_AWS_SECRET" ]    && PE_AWS_SECRET=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('aws_secret',''))" "$RESULT_FILE")
+        local _phone_region
+        _phone_region=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('aws_region',''))" "$RESULT_FILE")
+        [ -n "$_phone_region" ] && PE_AWS_REGION="$_phone_region"
+        local _tools
+        _tools=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(','.join(d.get('tools',[])))" "$RESULT_FILE")
+        PE_GITHUB=$([[ "$_tools" == *"github"* ]] && echo "y" || echo "n")
+        PE_GITHUB_TOKEN=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('github_token',''))" "$RESULT_FILE")
+        PE_VERCEL=$([[ "$_tools" == *"vercel"* ]] && echo "y" || echo "n")
+        PE_VERCEL_TOKEN=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('vercel_token',''))" "$RESULT_FILE")
+        PE_SUPABASE=$([[ "$_tools" == *"supabase"* ]] && echo "y" || echo "n")
+        PE_SUPABASE_TOKEN=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('supabase_token',''))" "$RESULT_FILE")
+        PE_DOCKER=$([[ "$_tools" == *"docker"* ]] && echo "y" || echo "n")
+        PE_CODEX=$([[ "$_tools" == *"codex"* ]] && echo "y" || echo "n")
+        PE_OPENAI_KEY=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('openai_key',''))" "$RESULT_FILE")
+        PE_AWSCLI="y"
+        rm -f "$RESULT_FILE"
+
+        _do_provision
+    fi
+}
+
+# ─── Init: Manual wizard (--manual flag) ─────────────────────────────────────
+
+_cmd_init_wizard() {
+    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Initialize your cloud dev environment"
+    echo ""
+
+    if ! command -v aws &>/dev/null; then
+        echo -e "${RED}AWS CLI required.${NC} Install: brew install awscli"
+        exit 1
+    fi
+
+    # Step 1: AWS credentials
+    echo -e "${BOLD}Step 1: AWS Credentials${NC}"
+    echo -e "${DIM}We'll create an EC2 in your account. You own everything.${NC}"
+    echo ""
+
+    local AWS_DETECTED=false
+    if aws sts get-caller-identity &>/dev/null 2>&1; then
+        local AWS_IDENTITY
+        AWS_IDENTITY=$(aws sts get-caller-identity --output json 2>/dev/null)
+        local AWS_ACCOUNT=$(echo "$AWS_IDENTITY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Account',''))" 2>/dev/null)
+        local AWS_ARN=$(echo "$AWS_IDENTITY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Arn',''))" 2>/dev/null)
+        PE_AWS_REGION="${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo 'us-east-1')}"
+
+        echo -e "  ${GREEN}Found AWS credentials${NC}"
+        echo -e "  Account:  ${BOLD}$AWS_ACCOUNT${NC}"
+        echo -e "  Identity: ${DIM}$AWS_ARN${NC}"
+        echo -e "  Region:   ${BOLD}$PE_AWS_REGION${NC}"
+        echo ""
+        read -p "  Use these credentials? [Y/n] " USE_EXISTING
+        USE_EXISTING="${USE_EXISTING:-y}"
+
+        if [[ "$USE_EXISTING" =~ ^[Yy] ]]; then
+            AWS_DETECTED=true
+            PE_AWS_KEY=""
+            PE_AWS_SECRET=""
+            echo ""
+            read -p "  Region [$PE_AWS_REGION]: " input_region
+            PE_AWS_REGION="${input_region:-$PE_AWS_REGION}"
+        fi
+    fi
+
+    if [ "$AWS_DETECTED" = false ]; then
+        echo ""
+        read -p "  AWS Access Key ID: " PE_AWS_KEY
+        read -sp "  AWS Secret Access Key: " PE_AWS_SECRET
+        echo ""
+        read -p "  Region [us-east-1]: " PE_AWS_REGION
+        PE_AWS_REGION="${PE_AWS_REGION:-us-east-1}"
+        echo ""
+
+        echo -n "  Validating... "
+        if ! AWS_ACCESS_KEY_ID="$PE_AWS_KEY" AWS_SECRET_ACCESS_KEY="$PE_AWS_SECRET" \
+             aws sts get-caller-identity --region "$PE_AWS_REGION" &>/dev/null; then
+            echo -e "${RED}Invalid credentials${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}Valid${NC}"
+    fi
+    echo ""
+
+    # Step 2: Anthropic key
+    echo -e "${BOLD}Step 2: Anthropic API Key${NC}"
+    echo -e "${DIM}Powers Claude Code. Get one at console.anthropic.com${NC}"
+    echo ""
+    read -sp "  API Key (sk-ant-...): " PE_ANTHROPIC_KEY
+    echo ""
+    echo ""
+
+    # Step 3: Tools
+    echo -e "${BOLD}Step 3: Your Toolchain${NC}"
+    echo -e "${DIM}Claude Code, Node.js, Python, Git, tmux are always installed.${NC}"
+    echo ""
+
+    PE_GITHUB="n"; PE_GITHUB_TOKEN=""
+    PE_VERCEL="n"; PE_VERCEL_TOKEN=""
+    PE_SUPABASE="n"; PE_SUPABASE_TOKEN=""
+    PE_DOCKER="n"
+    PE_CODEX="n"; PE_OPENAI_KEY=""
+    PE_AWSCLI="y"
+
+    read -p "  GitHub CLI?   [y/N] " PE_GITHUB; PE_GITHUB="${PE_GITHUB:-n}"
+    [[ "$PE_GITHUB" =~ ^[Yy] ]] && read -p "    Token (optional, Enter to skip): " PE_GITHUB_TOKEN
+
+    read -p "  Vercel?       [y/N] " PE_VERCEL; PE_VERCEL="${PE_VERCEL:-n}"
+    [[ "$PE_VERCEL" =~ ^[Yy] ]] && read -p "    Token (optional): " PE_VERCEL_TOKEN
+
+    read -p "  Supabase?     [y/N] " PE_SUPABASE; PE_SUPABASE="${PE_SUPABASE:-n}"
+    [[ "$PE_SUPABASE" =~ ^[Yy] ]] && read -p "    Token (optional): " PE_SUPABASE_TOKEN
+
+    read -p "  Docker?       [y/N] " PE_DOCKER; PE_DOCKER="${PE_DOCKER:-n}"
+
+    read -p "  OpenAI Codex? [y/N] " PE_CODEX; PE_CODEX="${PE_CODEX:-n}"
+    [[ "$PE_CODEX" =~ ^[Yy] ]] && read -p "    API key (optional): " PE_OPENAI_KEY
+
+    read -p "  AWS CLI?      [Y/n] " PE_AWSCLI; PE_AWSCLI="${PE_AWSCLI:-y}"
+
+    echo ""
+    echo -e "${BOLD}Step 4: Server Name${NC}"
+    read -p "  Name this server [default]: " PE_SERVER_NAME
+    PE_SERVER_NAME="${PE_SERVER_NAME:-default}"
+    echo ""
+
+    echo -e "${BOLD}Step 5: Launching${NC}"
+    echo ""
+
+    _do_provision
 }
 
 # ─── Setup: Connect to existing EC2 ─────────────────────────────────────────
@@ -578,6 +842,52 @@ cmd_setup() {
     fi
 }
 
+# ─── EC2 State ───────────────────────────────────────────────────────────────
+
+# Returns 0 if the instance is (now) running, 1 otherwise.
+# If stopped, offers to start it and updates EC2_HOST if the IP changed.
+_start_ec2_if_stopped() {
+    [ -z "$EC2_INSTANCE_ID" ] && return 1
+    command -v aws &>/dev/null || return 1
+
+    local state
+    state=$(aws ec2 describe-instances --instance-ids "$EC2_INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)
+
+    case "$state" in
+        running) return 0 ;;
+        stopped)
+            echo -e "  ${YELLOW}EC2 instance is stopped.${NC}"
+            read -p "  Start it? [Y/n] " _choice
+            _choice="${_choice:-y}"
+            [[ "$_choice" =~ ^[Yy] ]] || return 1
+
+            echo -n "  Starting"
+            aws ec2 start-instances --instance-ids "$EC2_INSTANCE_ID" &>/dev/null
+            for _ in $(seq 1 24); do
+                sleep 5; echo -n "."
+                local new_state new_ip
+                new_state=$(aws ec2 describe-instances --instance-ids "$EC2_INSTANCE_ID" \
+                    --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)
+                new_ip=$(aws ec2 describe-instances --instance-ids "$EC2_INSTANCE_ID" \
+                    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null)
+                if [ "$new_state" = "running" ] && [ -n "$new_ip" ] && [ "$new_ip" != "None" ]; then
+                    echo -e " ${GREEN}running${NC}"
+                    if [ "$new_ip" != "$EC2_HOST" ]; then
+                        echo -e "  ${DIM}IP updated: $EC2_HOST → $new_ip${NC}"
+                        EC2_HOST="$new_ip"
+                        save_config "$(active_profile)"
+                    fi
+                    return 0
+                fi
+            done
+            echo -e " ${RED}timed out${NC}"
+            return 1
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 # ─── Session Commands ────────────────────────────────────────────────────────
 
 cmd_interactive() {
@@ -589,29 +899,83 @@ cmd_interactive() {
     ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude'"
 }
 
-cmd_prompt() {
-    require_config
-    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Sending prompt..."
-    echo -e "${DIM}Close laptop anytime — session keeps running on EC2.${NC}"
-    echo ""
-    # Base64 encode prompt to avoid shell quoting issues (handles apostrophes, backticks, etc.)
-    local b64
-    b64=$(printf '%s' "$1" | base64 | tr -d '\n')
-    ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR \"echo $b64 | base64 -d | claude -p --verbose\""
-}
 
 cmd_resume() {
     require_config
     local sid="$1"
-    [ -z "$sid" ] && echo "Usage: pocketeng resume <session-id>" && exit 1
+
+    # No ID given — show interactive list to pick from
+    if [ -z "$sid" ]; then
+        echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Recent sessions"
+        echo ""
+        local sessions
+        sessions=$(ssh_cmd "
+            for dir in ~/.claude/projects/*/; do
+                for f in \"\$dir\"*.jsonl; do
+                    [ -f \"\$f\" ] || continue
+                    s=\$(basename \"\$f\" .jsonl)
+                    echo \"\$s\" | grep -q '^agent-' && continue
+                    first=\$(head -1 \"\$f\" | grep -oP '\"content\":\"\\K[^\"]+' | head -c 60)
+                    last=\$(tail -1 \"\$f\" | grep -oP '\"timestamp\":\"\\K[^\"]+')
+                    printf '%s\t%s\t%s\n' \"\$s\" \"\$last\" \"\$first\"
+                done
+            done | sort -k2 -r | head -10
+        " 2>/dev/null)
+
+        if [ -z "$sessions" ]; then
+            echo -e "  ${DIM}No sessions found.${NC}"
+            return
+        fi
+
+        local i=1
+        local -a sids
+        while IFS=$'\t' read -r s ts preview; do
+            printf "  ${BOLD}%2d${NC}  ${DIM}%s${NC}  %s\n" "$i" "${ts%T*}" "$preview"
+            sids[$i]="$s"
+            i=$((i + 1))
+        done <<< "$sessions"
+
+        echo ""
+        read -p "  Pick a session [1]: " choice
+        choice="${choice:-1}"
+        sid="${sids[$choice]}"
+        [ -z "$sid" ] && echo "Invalid choice." && exit 1
+    fi
+
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Resuming ${sid:0:8}..."
     ssh_cmd -t "tmux kill-session -t $TMUX_SESSION 2>/dev/null; tmux new-session -s $TMUX_SESSION -c $WORK_DIR 'claude --resume \"$sid\"'"
 }
 
 cmd_attach() {
     require_config
-    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Reattaching..."
-    ssh_cmd -t "tmux attach-session -t $TMUX_SESSION 2>/dev/null || echo 'No active session. Start one with: pocketeng'"
+    local tmux_state
+    tmux_state=$(ssh_cmd "tmux has-session -t $TMUX_SESSION 2>/dev/null && echo RUNNING || echo STOPPED" 2>/dev/null)
+
+    # SSH returned nothing — instance may be stopped
+    if [ -z "$tmux_state" ]; then
+        echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Cannot reach $EC2_HOST"
+        echo ""
+        if _start_ec2_if_stopped; then
+            echo -n "  Waiting for SSH"
+            for _ in $(seq 1 12); do
+                sleep 5; echo -n "."
+                tmux_state=$(ssh_cmd "tmux has-session -t $TMUX_SESSION 2>/dev/null && echo RUNNING || echo STOPPED" 2>/dev/null)
+                [ -n "$tmux_state" ] && break
+            done
+            echo ""
+        fi
+    fi
+
+    if [ "$tmux_state" = "RUNNING" ]; then
+        echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Reattaching..."
+        ssh_cmd -t "tmux attach-session -t $TMUX_SESSION"
+    else
+        echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — No active session."
+        echo ""
+        read -p "  Start a new session? [Y/n] " choice
+        choice="${choice:-y}"
+        [[ "$choice" =~ ^[Yy] ]] && cmd_interactive
+    fi
 }
 
 cmd_list() {
@@ -624,14 +988,14 @@ cmd_list() {
                 [ -f \"\$f\" ] || continue
                 sid=\$(basename \"\$f\" .jsonl)
                 echo \"\$sid\" | grep -q '^agent-' && continue
-                first=\$(head -1 \"\$f\" | grep -oP '\"content\":\"\\K[^\"]+' | head -c 80)
+                first=\$(head -1 \"\$f\" | grep -oP '\"content\":\"\\K[^\"]+' | head -c 70)
                 last=\$(tail -1 \"\$f\" | grep -oP '\"timestamp\":\"\\K[^\"]+')
-                printf '  %s  %s  %s\n' \"\${sid:0:8}\" \"\$last\" \"\$first\"
+                printf '  %s  %s  %s\n' \"\$sid\" \"\$last\" \"\$first\"
             done
         done | sort -k2 -r | head -10
     "
     echo ""
-    echo -e "${DIM}Resume: pocketeng resume <id>${NC}"
+    echo -e "${DIM}Resume: pocketeng resume${NC}"
 }
 
 cmd_status() {
@@ -675,70 +1039,9 @@ cmd_qr() {
     echo ""
 }
 
-cmd_sync() {
-    require_config
-    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Sync to EC2"
-    echo ""
-
-    local PROJECT_DIR
-    PROJECT_DIR="${2:-$(pwd)}"
-    echo -e "  Project:  ${BOLD}$PROJECT_DIR${NC}"
-
-    # Step 1: Generate handoff doc from active Claude session
-    echo -n "  Generating handoff from Claude session... "
-    local HANDOFF_FILE="$PROJECT_DIR/.handoff.md"
-    local HANDOFF_PROMPT='Write a concise handoff document for another Claude Code instance that will continue this work. Include:
-1. **Current State**: What has been built/changed so far
-2. **Key Decisions**: Important architectural or design decisions made
-3. **Pending Tasks**: What still needs to be done
-4. **Critical Context**: Anything a new session MUST know (API keys needed, deployment targets, gotchas, user preferences)
-5. **File Map**: Key files and what they do
-
-Be specific and actionable. No fluff. Write as markdown. Do NOT include any tool calls — just output the document text.'
-
-    # Try to get Claude to generate the handoff (timeout 60s)
-    local HANDOFF_CONTENT
-    if HANDOFF_CONTENT=$(cd "$PROJECT_DIR" && echo "$HANDOFF_PROMPT" | timeout 120 claude -p - --output-format text 2>/dev/null); then
-        echo "$HANDOFF_CONTENT" > "$HANDOFF_FILE"
-        echo -e "${GREEN}done${NC}"
-    else
-        echo -e "${YELLOW}skipped${NC} ${DIM}(no active session or Claude unavailable)${NC}"
-    fi
-
-    # Step 2: Ask user for custom notes
-    echo ""
-    echo -e "  ${DIM}Add any notes for the remote session (Enter to skip):${NC}"
-    read -r -p "  > " USER_NOTES
-    if [ -n "$USER_NOTES" ]; then
-        if [ -f "$HANDOFF_FILE" ]; then
-            echo "" >> "$HANDOFF_FILE"
-            echo "## User Notes" >> "$HANDOFF_FILE"
-            echo "$USER_NOTES" >> "$HANDOFF_FILE"
-        else
-            echo "## User Notes" > "$HANDOFF_FILE"
-            echo "$USER_NOTES" >> "$HANDOFF_FILE"
-        fi
-        echo -e "  ${GREEN}Notes added${NC}"
-    fi
-    echo ""
-
-    # Step 3: Sync code to EC2
-    local REMOTE_PROJECT="$WORK_DIR/$(basename "$PROJECT_DIR")"
-
-    # Ensure rsync is available on remote
-    echo -n "  Checking remote... "
-    if ! ssh_cmd "command -v rsync" &>/dev/null; then
-        echo -e "${YELLOW}installing rsync${NC}"
-        ssh_cmd "sudo dnf install -y rsync 2>/dev/null || sudo yum install -y rsync 2>/dev/null || sudo apt-get install -y rsync 2>/dev/null" &>/dev/null
-    else
-        echo -e "${GREEN}ok${NC}"
-    fi
-
-    echo -n "  Syncing code to EC2... "
-    ssh_cmd "mkdir -p '$REMOTE_PROJECT'" 2>/dev/null
-
-    local RSYNC_OUT
-    RSYNC_OUT=$(rsync -az \
+_do_rsync() {
+    local src="$1" dest="$2"
+    rsync -az --delete \
         --exclude '.git' \
         --exclude 'node_modules' \
         --exclude '.build' \
@@ -749,41 +1052,79 @@ Be specific and actionable. No fluff. Write as markdown. Do NOT include any tool
         --exclude 'build' \
         --exclude '.claude' \
         -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-        "$PROJECT_DIR/" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/" 2>&1)
+        "$src/" "$EC2_USER@$EC2_HOST:$dest/" 2>&1
+}
+
+cmd_sync() {
+    require_config
+
+    # Parse flags: optional path and --watch/-w
+    local WATCH=false PROJECT_DIR=""
+    shift  # drop "sync"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --watch|-w) WATCH=true; shift ;;
+            -*) shift ;;
+            *)  PROJECT_DIR="$1"; shift ;;
+        esac
+    done
+    PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+
+    echo -e "${PURPLE}${BOLD}Pocket Eng${NC} — Sync to EC2"
+    echo ""
+    local REMOTE_PROJECT="$WORK_DIR/$(basename "$PROJECT_DIR")"
+    echo -e "  ${BOLD}$(basename "$PROJECT_DIR")${NC}  →  ${DIM}$EC2_HOST:$REMOTE_PROJECT${NC}"
+    echo ""
+
+    # Ensure rsync is available on remote
+    if ! ssh_cmd "command -v rsync" &>/dev/null; then
+        ssh_cmd "sudo dnf install -y rsync 2>/dev/null || sudo yum install -y rsync 2>/dev/null || sudo apt-get install -y rsync 2>/dev/null" &>/dev/null
+    fi
+    ssh_cmd "mkdir -p '$REMOTE_PROJECT'" 2>/dev/null
+
+    # Initial sync
+    local out
+    out=$(_do_rsync "$PROJECT_DIR" "$REMOTE_PROJECT")
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}done${NC}"
+        echo -e "  ${GREEN}✓${NC} Synced"
     else
-        echo -e "${RED}failed${NC}"
-        echo -e "  ${DIM}$RSYNC_OUT${NC}"
+        echo -e "  ${RED}Sync failed${NC}"
+        echo -e "  ${DIM}$out${NC}"
         return 1
     fi
 
-    # Step 4: Copy CLAUDE.md and handoff to EC2
-    echo -n "  Syncing context files... "
-    if [ -f "$PROJECT_DIR/CLAUDE.md" ]; then
-        rsync -azq \
-            -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-            "$PROJECT_DIR/CLAUDE.md" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/CLAUDE.md" 2>/dev/null
+    if $WATCH; then
+        echo ""
+        echo -e "  ${DIM}Watching for changes...  Ctrl+C to stop${NC}"
+        echo ""
+        _sync_one() {
+            local o
+            o=$(_do_rsync "$PROJECT_DIR" "$REMOTE_PROJECT")
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓${NC} $(date +%H:%M:%S)"
+            else
+                echo -e "  ${RED}✗${NC} $(date +%H:%M:%S) — ${DIM}$(echo "$o" | head -1)${NC}"
+            fi
+        }
+        if command -v fswatch &>/dev/null; then
+            fswatch -o --exclude '\.git' --exclude 'node_modules' "$PROJECT_DIR" \
+                | while read -r _; do _sync_one; done
+        elif command -v inotifywait &>/dev/null; then
+            while inotifywait -r -q -e modify,create,delete,move \
+                --exclude '(\.git|node_modules)' "$PROJECT_DIR" 2>/dev/null; do
+                _sync_one
+            done
+        else
+            echo -e "  ${YELLOW}fswatch not found${NC} — polling every 3s  ${DIM}(brew install fswatch for native watching)${NC}"
+            echo ""
+            while true; do sleep 3; _sync_one; done
+        fi
+    else
+        echo ""
+        echo -e "  ${DIM}pocketeng — to open a session on EC2${NC}"
+        echo -e "  ${DIM}pocketeng sync --watch — live sync on every save${NC}"
+        echo ""
     fi
-    if [ -f "$HANDOFF_FILE" ]; then
-        rsync -azq \
-            -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-            "$HANDOFF_FILE" "$EC2_USER@$EC2_HOST:$REMOTE_PROJECT/.handoff.md" 2>/dev/null
-    fi
-    echo -e "${GREEN}done${NC}"
-
-    echo ""
-    echo -e "${GREEN}${BOLD}  Synced!${NC}"
-    echo ""
-    echo -e "  Remote project: ${DIM}$REMOTE_PROJECT${NC}"
-    if [ -f "$HANDOFF_FILE" ]; then
-        local HANDOFF_SIZE
-        HANDOFF_SIZE=$(du -sh "$HANDOFF_FILE" | cut -f1)
-        echo -e "  Handoff:        ${DIM}.handoff.md ($HANDOFF_SIZE)${NC}"
-    fi
-    echo ""
-    echo -e "  ${BOLD}Phone:${NC} Open project → new session → Claude will read .handoff.md"
-    echo ""
 }
 
 cmd_servers() {
@@ -852,19 +1193,21 @@ cmd_help() {
     echo -e "${PURPLE}${BOLD}Pocket Eng${NC} v$VERSION — Claude Code on your cloud, from anywhere."
     echo ""
     echo "Getting started:"
-    echo "  pocketeng init                 Provision a new EC2 dev environment"
+    echo "  pocketeng                      First run: scan QR with Pocket Eng app to provision"
+    echo "  pocketeng init                 Provision via phone app (scan QR)"
+    echo "  pocketeng init --manual        Provision via wizard (no phone required)"
     echo "  pocketeng setup                Connect to an existing EC2"
     echo ""
     echo "Daily use:"
-    echo "  pocketeng                      Interactive Claude Code session"
-    echo "  pocketeng \"prompt\"              One-shot prompt"
+    echo "  pocketeng                      Start or resume interactive Claude Code session"
     echo "  pocketeng attach                Reattach to running session"
-    echo "  pocketeng resume <id>           Resume a past session"
+    echo "  pocketeng resume               Pick and resume a past session"
     echo "  pocketeng list                  List sessions"
     echo "  pocketeng status                Check if Claude is running"
     echo "  pocketeng qr                    Show QR code for phone app"
     echo "  pocketeng logs                  Show EC2 setup/install log"
-    echo "  pocketeng sync [path]           Sync project + session to EC2"
+    echo "  pocketeng sync [path]           Sync current directory to EC2
+  pocketeng sync --watch          Live sync — re-sync on every file save"
     echo ""
     echo "Multi-server:"
     echo "  pocketeng servers               List all configured servers"
@@ -873,9 +1216,10 @@ cmd_help() {
     echo "  pocketeng sync --server <name>   Sync to a specific server"
     echo ""
     echo "How it works:"
-    echo "  1. Run 'pocketeng init' on your laptop"
-    echo "  2. Scan the QR code with the Pocket Eng app"
-    echo "  3. Code from laptop or phone — sessions survive disconnects"
+    echo "  1. brew install pocketeng (or curl install)"
+    echo "  2. Run 'pocketeng' — scan the QR code with the Pocket Eng app"
+    echo "  3. Tap 'Spin up EC2' in the app — done in ~2 minutes"
+    echo "  4. Code from laptop or phone — sessions survive disconnects"
 }
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -894,7 +1238,7 @@ set -- "${ARGS[@]}"
 load_config
 
 case "${1:-}" in
-    init)           cmd_init ;;
+    init)           cmd_init "$@" ;;
     setup)          cmd_setup "$@" ;;
     sync)           cmd_sync "$@" ;;
     servers|--servers)   cmd_servers ;;
@@ -907,7 +1251,7 @@ case "${1:-}" in
     logs|--logs)         cmd_logs ;;
     help|--help|-h)      cmd_help ;;
     version|--version|-v) echo "pocketeng v$VERSION" ;;
-    "")             cmd_interactive ;;
+    "")             [ -z "$EC2_HOST" ] && cmd_init || cmd_interactive ;;
     -*)             echo "Unknown option: $1"; cmd_help; exit 1 ;;
-    *)              cmd_prompt "$1" ;;
+    *)              echo "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

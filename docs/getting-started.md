@@ -1,64 +1,73 @@
 # Getting Started
 
-Set up Pocket Eng in under 5 minutes. You'll have Claude Code running on your own EC2, accessible from your laptop and phone.
+Set up Pocket Eng in under 5 minutes — no AWS knowledge required.
 
 ## What you need
 
+- An iPhone with the **Pocket Eng** app installed
 - A Mac or Linux terminal
-- An AWS account
-- An [Anthropic API key](https://console.anthropic.com)
-- [AWS CLI](https://aws.amazon.com/cli/) installed (`brew install awscli`)
+- An [Anthropic API key](https://console.anthropic.com) *(the app will ask for this)*
+- An AWS account *(the app will handle credentials)*
 
-## Install
+## Install the CLI
+
+```bash
+brew install vaibs-d/pocketengineer/pocketeng
+```
+
+Or with curl:
 
 ```bash
 curl -fsSL https://pocketeng.co/install | sh
 ```
 
-## Provision your server
-
-```bash
-pocketeng init
-```
-
-The wizard asks for three things:
-
-1. **AWS credentials** — access key + secret key + region
-2. **Anthropic API key** — your `sk-ant-...` key
-3. **Toolchain** — pick what you want installed (GitHub CLI, Vercel, Docker, etc.)
-
-It then launches a `t3.medium` EC2 with everything pre-installed. Takes about 2 minutes.
-
-When it's done, you'll see a QR code. That's for the phone app.
-
-## Start coding
+## Run it
 
 ```bash
 pocketeng
 ```
 
-This opens Claude Code inside a tmux session on your EC2. You can close your laptop — the session keeps running.
+A QR code appears in your terminal. That's it — the app takes it from here.
 
-To come back later:
+1. Open the **Pocket Eng** app
+2. Tap **Connect Mac** and scan the QR code
+3. The app detects your Mac and asks: **"Spin up your EC2?"**
+4. Tap yes — EC2 provisions, Claude Code installs, ~2 minutes
+
+When it's done, your session is live on both your laptop and phone.
+
+## Start coding
+
+On your laptop:
+
+```bash
+pocketeng
+```
+
+On your phone: just open the app — the session is already running.
+
+Close your laptop anytime. The session keeps going on EC2. Come back with:
 
 ```bash
 pocketeng attach
 ```
 
-## Connect your phone
+## No phone? Use the manual wizard
 
-1. Open the **Pocket Eng** iOS app
-2. Tap **Add Server**
-3. Scan the QR code from your terminal (run `pocketeng qr` to show it again)
+If you prefer to set up without the app:
 
-That's it. Your phone is connected to the same EC2. You can start sessions, send prompts, and see Claude work — all from your phone.
+```bash
+pocketeng init --manual
+```
+
+This walks you through AWS credentials, Anthropic API key, and toolchain selection.
 
 ## Already have an EC2?
 
-Skip provisioning and connect to your existing server:
+Connect to your existing server instead of provisioning a new one:
 
 ```bash
 pocketeng setup
 ```
 
-Enter your host, SSH key path, and user. Pocket Eng doesn't install anything on your server — it just needs SSH access and Claude Code already installed.
+Enter your host, SSH key path, and user.

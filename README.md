@@ -39,46 +39,40 @@ You own the machine, the keys, and the code.
 
 ---
 
-## Install
+## Quick Start
+
+**1.** Download the **Pocket Eng** app on your iPhone.
+
+**2.** Install the CLI:
+
+```bash
+brew install vaibs-d/pocketengineer/pocketeng
+```
+
+<details>
+<summary>Other install methods</summary>
 
 ```bash
 curl -fsSL https://pocketeng.co/install | sh
 ```
 
-<details>
-<summary>Other methods</summary>
-
-**Homebrew:**
-```bash
-brew install vaibs-d/pocketengineer/pocketeng
-```
-
-**Manual:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/vaibs-d/pocketengineer/main/pocketeng \
-  -o /usr/local/bin/pocketeng && chmod +x /usr/local/bin/pocketeng
-```
-
 </details>
 
-## Quick Start
+**3.** Run it:
 
 ```bash
-pocketeng init
+pocketeng
 ```
 
-That's it. The wizard walks you through everything:
+A QR code appears. Scan it with the Pocket Eng app — it asks **"Spin up your EC2?"** — tap yes. Done in ~2 minutes. Claude is running.
 
-1. **AWS credentials** — we spin up a `t3.medium` EC2 in your account
-2. **Anthropic API key** — powers Claude Code on the server
-3. **Your toolchain** — pick from GitHub CLI, Vercel, Supabase, Docker, AWS CLI
-4. **Done** — SSH key, security group, and Claude Code are set up automatically
-
-At the end you get a QR code. Scan it with the **Pocket Eng** iOS app to steer Claude from your phone.
+> No AWS knowledge required. The app handles credentials and setup.
 
 ```bash
-# Start coding
+# Pick up from your laptop any time
 pocketeng
+
+# Or open the app — your session is already live on the phone
 ```
 
 ## Commands
